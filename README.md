@@ -1,8 +1,8 @@
-[YTMU+Latest]: https://github.com/Mark02-2012/MaxMusic/releases/download/MaxMusic_9.36.1_2.4.1_(90)/MaxMusic_2.4.1_9.36.1.ipa
+[YTMU+Latest]: https://github.com/Mark02-2012/MaxMusic/releases/download/MaxMusic_9.37.2_2.4.1_(93)/MaxMusic_2.4.1_9.37.2.ipa
 
-[YTMUlatest]: https://github.com/Mark02-2012/MaxMusic/releases/download/YTMU_9.36.1_2.4.1_(92)/YTMusicUltimate_2.4.1_9.36.1.ipa
+[YTMUlatest]: https://github.com/Mark02-2012/MaxMusic/releases/download/YTMU_9.37.2_2.4.1_(95)/YTMusicUltimate_2.4.1_9.37.2.ipa
 
-[YTMU+no-YMP]: https://github.com/Mark02-2012/MaxMusic/releases/download/MaxMusic_9.36.1_2.4.1_(91)/MaxMusic_no-YMP_2.4.1_9.36.1.ipa
+[YTMU+no-YMP]: https://github.com/Mark02-2012/MaxMusic/releases/download/MaxMusic_9.37.2_2.4.1_(94)/MaxMusic_no_YMP_2.4.1_9.37.2.ipa
 
 <h1 p align="center">MaxMusic (ex YTMUltimate+)</h1>
    
