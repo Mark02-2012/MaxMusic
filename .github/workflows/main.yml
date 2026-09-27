@@ -200,7 +200,7 @@ jobs:
 
       - name: Build YTMusicUltimate Tweak
         run: |
-          cd main && make clean package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootless
+          cd main && make clean package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootless SIDELOADING=1
           mv packages/*.deb ../ytmult.deb
 
       - name: Determines the Release Title Prefix
