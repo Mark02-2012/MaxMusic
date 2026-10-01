@@ -25,6 +25,12 @@ on:
        type: boolean
        required: true
        default: false
+
+      enable_vmb:
+       description: "Integrate VolumeMixerBoost (test)"
+       type: boolean
+       required: true
+       default: false
        
       ipa_url:
         description: "URL to the decrypted IPA file"
@@ -66,7 +72,7 @@ jobs:
       - name: Hide sensitive inputs
         uses: levibostian/action-hide-sensitive-inputs@v1
         with:
-          exclude_inputs: bundle_id,display_name,enable_rymd,enable_ytmabc,enable_youmusicpip,enable_volumeboostyt
+          exclude_inputs: bundle_id,display_name,enable_rymd,enable_ytmabc,enable_youmusicpip,enable_volumeboostyt,enable_vmb
 
       - name: Validate IPA URL
         run: |
@@ -174,6 +180,10 @@ jobs:
         if: ${{ inputs.enable_volumeboostyt }}
         run: git clone --quiet --depth=1 https://github.com/VasirakCalgux/VolumeBoostYT.git
 
+      - name: Clone VolumeMixerBoost
+        if: ${{ inputs.enable_vmb }}
+        run: git clone --quiet --depth=1 https://github.com/irum0320/VolumeMixerBoost.git
+
       - name: Build Return-YouTube-Music-Dislikes
         if: ${{ inputs.enable_rymd }}
         run: |
@@ -198,7 +208,14 @@ jobs:
           cd VolumeBoostYT && make clean package DEBUG=0 FINALPACKAGE=1
           mv packages/*.deb ../volumeboostyt.deb
 
-      - name: Build YTMusicUltimate Tweak
+      - name: Build VolumeMixerBooster
+        if: ${{ inputs.enable_vmb }}
+        run: |
+          cd VolumeMixerBoost && make clean
+          make -j$(sysctl -n hw.ncpu) package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME: rootless
+          mv packages/*.deb ../volumeboostyt.deb
+
+      - name: Build Modified YTMusicUltimate Tweak
         run: |
           cd main && make clean package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootless SIDELOADING=1
           mv packages/*.deb ../ytmult.deb
@@ -208,7 +225,8 @@ jobs:
           if [ "${{ inputs.enable_rymd }}" = "false" ] && \
              [ "${{ inputs.enable_volumeboostyt }}" = "false" ] && \
              [ "${{ inputs.enable_youmusicpip }}" = "false" ] && \
-             [ "${{ inputs.enable_ytmabc }}" = "false" ]; then
+             [ "${{ inputs.enable_ytmabc }}" = "false" ] && \
+             [ "${{ inputs.enable_vmb }}" = "false" ]; then
             
             echo "RELEASE_PREFIX=YTMusicUltimate" >> $GITHUB_ENV
           else
@@ -224,7 +242,8 @@ jobs:
           if [ "${{ inputs.enable_rymd }}" = "false" ] && \
              [ "${{ inputs.enable_volumeboostyt }}" = "false" ] && \
              [ "${{ inputs.enable_youmusicpip }}" = "false" ] && \
-             [ "${{ inputs.enable_ytmabc }}" = "false" ]; then
+             [ "${{ inputs.enable_ytmabc }}" = "false" ] && \
+             [ "${{ inputs.enable_vmb }}" = "false" ]; then
             
             echo "TAG_PREFIX=YTMU" >> $GITHUB_ENV
           else
