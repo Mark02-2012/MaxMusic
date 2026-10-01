@@ -23,7 +23,7 @@ The best fork of YTMusicUltimate that adds more tweaks for the YouTube Music app
 
 <h2 p align="center">More info</h2>
 <p align="center">
-   The updates will be released every new YTMusic/YTMusicUltimate version (stimated time for updates: 3-24 hours; VARIABLE), but also ON MY NEW TELEGRAM CHANNEL 👉<a href="https://t.me/Mark02workshop_official">LINK TO JOIN</a>👈
+   The updates will be released every new YTMusic/YTMusicUltimate version (estimated time for updates: 3-24 hours; VARIABLE), but also ON MY NEW TELEGRAM CHANNEL 👉<a href="https://t.me/Mark02workshop_official">LINK TO JOIN</a>👈
 
 <p align="center">
    <a href="#so-what-is-ytmultimate">More info about YTMUltimate+</a>
