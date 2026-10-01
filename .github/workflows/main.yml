@@ -60,6 +60,7 @@ jobs:
         uses: actions/checkout@v6.0.2
         with:
           path: main
+          ref: ${{ github.ref }}
           submodules: recursive
 
       - name: Hide sensitive inputs
@@ -197,9 +198,10 @@ jobs:
           cd VolumeBoostYT && make clean package DEBUG=0 FINALPACKAGE=1
           mv packages/*.deb ../volumeboostyt.deb
 
-      - name: Download YTMusicUltimate 2.4.1 With Fixed Downloads
+      - name: Build YTMusicUltimate Tweak
         run: |
-          curl -L -o ./ytmult.deb https://files.catbox.moe/u8c7df.deb
+          cd main && make clean package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootless SIDELOADING=1
+          mv packages/*.deb ../ytmult.deb
 
       - name: Determines the Release Title Prefix
         run: |
