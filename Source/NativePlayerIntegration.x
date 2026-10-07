@@ -129,12 +129,13 @@
 }
 
 - (void)playbackController:(id)arg1 didActivateVideo:(id)arg2 withPlaybackData:(id)arg3 {
-    %orig;
-    if ([[%c(YTMOfflinePlayerManager) sharedManager] isOfflinePlayerActive]) {
-        [(id)self ytmu_pauseOnlinePlayer];
-    } else {
-        [[%c(YTMOfflinePlayerManager) sharedManager] markOnlinePlayerActive];
+    YTMOfflinePlayerManager *manager = [%c(YTMOfflinePlayerManager) sharedManager];
+
+    if (manager.isOfflinePlayerActive) {
+        [manager markOnlinePlayerActive];
     }
+
+    %orig;
 }
 
 %new
