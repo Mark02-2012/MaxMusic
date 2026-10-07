@@ -37,24 +37,32 @@
 - (void)handleCommand:(YTICommand *)command sender:(id)sender;
 @end
 
+
+#pragma mark - Native player integration
+
 @implementation UIViewController (YTMNativePlayer)
 
 + (void)ytm_playVideoWithID:(NSString *)videoId fromSender:(id)sender {
-    if (!videoId || videoId.length == 0) return;
-    
+    if (!videoId || videoId.length == 0) {
+        return;
+    }
+
+    // We are explicitly starting an online video.
     [[%c(YTMOfflinePlayerManager) sharedManager] markOnlinePlayerActive];
-    
+
     YTIWatchEndpoint *watchEndpoint = [%c(YTIWatchEndpoint) new];
     watchEndpoint.videoId = videoId;
-    
+
     YTICommand *command = [%c(YTICommand) new];
     command.watchEndpoint = watchEndpoint;
-    
-    UIViewController *topVC = [UIApplication sharedApplication].keyWindow.rootViewController;
+
+    UIViewController *topVC =
+        [UIApplication sharedApplication].keyWindow.rootViewController;
+
     while (topVC.presentedViewController) {
         topVC = topVC.presentedViewController;
     }
-    
+
     if ([topVC respondsToSelector:@selector(handleCommand:sender:)]) {
         [topVC handleCommand:command sender:sender];
     } else if ([topVC respondsToSelector:@selector(handleCommand:)]) {
@@ -62,75 +70,143 @@
     } else {
         UIWindow *window = [UIApplication sharedApplication].keyWindow;
         UIViewController *rootVC = window.rootViewController;
+
         if ([rootVC respondsToSelector:@selector(handleCommand:sender:)]) {
             [(id)rootVC handleCommand:command sender:sender];
         } else if ([rootVC respondsToSelector:@selector(handleCommand:)]) {
-            [(id)rootVC handleCommand:command];
+            [rootVC handleCommand:command];
         }
     }
 }
 
 @end
 
+
+#pragma mark - Online command detection
+
 %hook UIViewController
+
 - (void)handleCommand:(id)command sender:(id)sender {
-    if (command && [command respondsToSelector:@selector(watchEndpoint)] && [command performSelector:@selector(watchEndpoint)] != nil) {
+    if (command &&
+        [command respondsToSelector:@selector(watchEndpoint)] &&
+        [command performSelector:@selector(watchEndpoint)] != nil) {
+
         [[%c(YTMOfflinePlayerManager) sharedManager] markOnlinePlayerActive];
     }
+
     %orig;
 }
+
 - (void)handleCommand:(id)command {
-    if (command && [command respondsToSelector:@selector(watchEndpoint)] && [command performSelector:@selector(watchEndpoint)] != nil) {
+    if (command &&
+        [command respondsToSelector:@selector(watchEndpoint)] &&
+        [command performSelector:@selector(watchEndpoint)] != nil) {
+
         [[%c(YTMOfflinePlayerManager) sharedManager] markOnlinePlayerActive];
     }
+
     %orig;
 }
+
 %end
 
+
+#pragma mark - Local downloaded audio integration
+
 %hook YTPlayerResponse
+
 - (YTIStreamingData *)streamingData {
     YTIStreamingData *sd = %orig;
-    
+
     NSString *vId = nil;
+
     if ([self respondsToSelector:@selector(videoDetails)]) {
         vId = self.playerData.videoDetails.videoId;
     }
+
     if (!vId && [self respondsToSelector:@selector(contentVideoID)]) {
         vId = [(id)self contentVideoID];
     }
-    
+
     if (vId) {
-        NSString *localFileName = [YTMDownloadMetadata fileNameForVideoId:vId];
+        NSString *localFileName =
+            [YTMDownloadMetadata fileNameForVideoId:vId];
+
         if (!localFileName) {
-            NSURL *documentsURL = [[[NSFileManager defaultManager] URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask] lastObject];
-            NSURL *directURL = [documentsURL URLByAppendingPathComponent:[NSString stringWithFormat:@"YTMusicUltimate/%@", vId]];
-            if ([[NSFileManager defaultManager] fileExistsAtPath:directURL.path]) {
+            NSURL *documentsURL =
+                [[[NSFileManager defaultManager]
+                    URLsForDirectory:NSDocumentDirectory
+                           inDomains:NSUserDomainMask] lastObject];
+
+            NSURL *directURL =
+                [documentsURL
+                    URLByAppendingPathComponent:
+                        [NSString stringWithFormat:@"YTMusicUltimate/%@", vId]];
+
+            if ([[NSFileManager defaultManager]
+                    fileExistsAtPath:directURL.path]) {
+
                 localFileName = vId;
             }
         }
-        
+
         if (localFileName) {
-            NSURL *documentsURL = [[[NSFileManager defaultManager] URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask] lastObject];
-            NSURL *localAudioURL = [documentsURL URLByAppendingPathComponent:[NSString stringWithFormat:@"YTMusicUltimate/%@", localFileName]];
-            if ([[NSFileManager defaultManager] fileExistsAtPath:localAudioURL.path]) {
+            NSURL *documentsURL =
+                [[[NSFileManager defaultManager]
+                    URLsForDirectory:NSDocumentDirectory
+                           inDomains:NSUserDomainMask] lastObject];
+
+            NSURL *localAudioURL =
+                [documentsURL
+                    URLByAppendingPathComponent:
+                        [NSString stringWithFormat:
+                            @"YTMusicUltimate/%@",
+                            localFileName]];
+
+            if ([[NSFileManager defaultManager]
+                    fileExistsAtPath:localAudioURL.path]) {
+
                 sd.hlsManifestURL = localAudioURL.absoluteString;
             }
         }
     }
-    
+
     return sd;
 }
+
 %end
 
+
+#pragma mark - Player activation
+
 %hook YTPlayerViewController
+
 - (void)viewDidLoad {
     %orig;
-    [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(ytmu_pauseOnlinePlayer) name:YTMU_PauseOnlinePlayerNotification object:nil];
+
+    [[NSNotificationCenter defaultCenter]
+        addObserver:self
+           selector:@selector(ytmu_pauseOnlinePlayer)
+               name:YTMU_PauseOnlinePlayerNotification
+             object:nil];
 }
 
-- (void)playbackController:(id)arg1 didActivateVideo:(id)arg2 withPlaybackData:(id)arg3 {
-    YTMOfflinePlayerManager *manager = [%c(YTMOfflinePlayerManager) sharedManager];
+- (void)playbackController:(id)arg1
+       didActivateVideo:(id)arg2
+       withPlaybackData:(id)arg3 {
 
+    YTMOfflinePlayerManager *manager =
+        [%c(YTMOfflinePlayerManager) sharedManager];
+
+    /*
+     * An online video has now been activated.
+     *
+     * The offline player may still have its active flag set because
+     * closing the offline player UI does not necessarily clear it.
+     *
+     * Clear it BEFORE %orig so the normal YouTube player is allowed
+     * to continue.
+     */
     if (manager.isOfflinePlayerActive) {
         [manager markOnlinePlayerActive];
     }
@@ -139,9 +215,11 @@
 }
 
 %new
+
 - (void)ytmu_pauseOnlinePlayer {
     dispatch_async(dispatch_get_main_queue(), ^{
         id playerObj = (id)self;
+
         if ([playerObj respondsToSelector:@selector(pause)]) {
             [playerObj performSelector:@selector(pause)];
         } else if ([playerObj respondsToSelector:@selector(pauseVideo)]) {
@@ -149,164 +227,322 @@
         }
     });
 }
+
 %end
 
+
+#pragma mark - Now Playing information
+
 %hook MPNowPlayingInfoCenter
+
 - (void)setNowPlayingInfo:(NSDictionary *)info {
-    if ([[%c(YTMOfflinePlayerManager) sharedManager] isOfflinePlayerActive]) {
+    if ([[%c(YTMOfflinePlayerManager) sharedManager]
+            isOfflinePlayerActive]) {
+
         if (!gIsOfflineUpdatingNowPlayingInfo) {
             return;
         }
     }
+
     %orig;
 }
+
 %end
+
+
+#pragma mark - Queue controller
 
 %hook YTQueueController
+
 - (void)play {
-    if ([[%c(YTMOfflinePlayerManager) sharedManager] isOfflinePlayerActive]) return;
+    if ([[%c(YTMOfflinePlayerManager) sharedManager]
+            isOfflinePlayerActive]) {
+        return;
+    }
+
     %orig;
 }
+
 - (void)playVideo {
-    if ([[%c(YTMOfflinePlayerManager) sharedManager] isOfflinePlayerActive]) return;
+    if ([[%c(YTMOfflinePlayerManager) sharedManager]
+            isOfflinePlayerActive]) {
+        return;
+    }
+
     %orig;
 }
+
 - (void)nextVideo {
-    if ([[%c(YTMOfflinePlayerManager) sharedManager] isOfflinePlayerActive]) return;
+    if ([[%c(YTMOfflinePlayerManager) sharedManager]
+            isOfflinePlayerActive]) {
+        return;
+    }
+
     %orig;
 }
+
 - (void)previousVideo {
-    if ([[%c(YTMOfflinePlayerManager) sharedManager] isOfflinePlayerActive]) return;
+    if ([[%c(YTMOfflinePlayerManager) sharedManager]
+            isOfflinePlayerActive]) {
+        return;
+    }
+
     %orig;
 }
-- (void)skipToNext {
-    if ([[%c(YTMOfflinePlayerManager) sharedManager] isOfflinePlayerActive]) return;
+
+- (void)skipToNextVideo {
+    if ([[%c(YTMOfflinePlayerManager) sharedManager]
+            isOfflinePlayerActive]) {
+        return;
+    }
+
     %orig;
 }
-- (void)skipToPrevious {
-    if ([[%c(YTMOfflinePlayerManager) sharedManager] isOfflinePlayerActive]) return;
+
+- (void)skipToPreviousVideo {
+    if ([[%c(YTMOfflinePlayerManager) sharedManager]
+            isOfflinePlayerActive]) {
+        return;
+    }
+
     %orig;
 }
-- (void)playNextVideo {
-    if ([[%c(YTMOfflinePlayerManager) sharedManager] isOfflinePlayerActive]) return;
-    %orig;
-}
-- (void)playPreviousVideo {
-    if ([[%c(YTMOfflinePlayerManager) sharedManager] isOfflinePlayerActive]) return;
-    %orig;
-}
+
 %end
+
+
+#pragma mark - Local playback controller
 
 %hook YTLocalPlaybackController
+
 - (void)play {
-    if ([[%c(YTMOfflinePlayerManager) sharedManager] isOfflinePlayerActive]) return;
+    if ([[%c(YTMOfflinePlayerManager) sharedManager]
+            isOfflinePlayerActive]) {
+        return;
+    }
+
     %orig;
 }
+
 - (void)playVideo {
-    if ([[%c(YTMOfflinePlayerManager) sharedManager] isOfflinePlayerActive]) return;
+    if ([[%c(YTMOfflinePlayerManager) sharedManager]
+            isOfflinePlayerActive]) {
+        return;
+    }
+
     %orig;
 }
+
 - (void)nextVideo {
-    if ([[%c(YTMOfflinePlayerManager) sharedManager] isOfflinePlayerActive]) return;
+    if ([[%c(YTMOfflinePlayerManager) sharedManager]
+            isOfflinePlayerActive]) {
+        return;
+    }
+
     %orig;
 }
+
 - (void)previousVideo {
-    if ([[%c(YTMOfflinePlayerManager) sharedManager] isOfflinePlayerActive]) return;
+    if ([[%c(YTMOfflinePlayerManager) sharedManager]
+            isOfflinePlayerActive]) {
+        return;
+    }
+
     %orig;
 }
-- (void)playNextVideo {
-    if ([[%c(YTMOfflinePlayerManager) sharedManager] isOfflinePlayerActive]) return;
-    %orig;
-}
-- (void)playPreviousVideo {
-    if ([[%c(YTMOfflinePlayerManager) sharedManager] isOfflinePlayerActive]) return;
-    %orig;
-}
+
 %end
+
+
+#pragma mark - Single video controller
 
 %hook YTSingleVideoController
+
 - (void)play {
-    if ([[%c(YTMOfflinePlayerManager) sharedManager] isOfflinePlayerActive]) return;
+    if ([[%c(YTMOfflinePlayerManager) sharedManager]
+            isOfflinePlayerActive]) {
+        return;
+    }
+
     %orig;
 }
+
 - (void)playVideo {
-    if ([[%c(YTMOfflinePlayerManager) sharedManager] isOfflinePlayerActive]) return;
+    if ([[%c(YTMOfflinePlayerManager) sharedManager]
+            isOfflinePlayerActive]) {
+        return;
+    }
+
     %orig;
 }
+
 - (void)nextVideo {
-    if ([[%c(YTMOfflinePlayerManager) sharedManager] isOfflinePlayerActive]) return;
+    if ([[%c(YTMOfflinePlayerManager) sharedManager]
+            isOfflinePlayerActive]) {
+        return;
+    }
+
     %orig;
 }
+
 - (void)previousVideo {
-    if ([[%c(YTMOfflinePlayerManager) sharedManager] isOfflinePlayerActive]) return;
+    if ([[%c(YTMOfflinePlayerManager) sharedManager]
+            isOfflinePlayerActive]) {
+        return;
+    }
+
     %orig;
 }
+
 %end
+
+
+#pragma mark - Main player controls
 
 %hook YTPlayerViewController
+
+/*
+ * IMPORTANT:
+ *
+ * These methods used to simply return while the offline player was
+ * active. That could prevent YouTube from ever reaching
+ * playbackController:didActivateVideo:...
+ *
+ * We therefore clear the offline state FIRST, then let YouTube
+ * continue normally.
+ */
+
 - (void)play {
-    if ([[%c(YTMOfflinePlayerManager) sharedManager] isOfflinePlayerActive]) return;
+    [[%c(YTMOfflinePlayerManager) sharedManager]
+        markOnlinePlayerActive];
+
     %orig;
 }
+
 - (void)playVideo {
-    if ([[%c(YTMOfflinePlayerManager) sharedManager] isOfflinePlayerActive]) return;
+    [[%c(YTMOfflinePlayerManager) sharedManager]
+        markOnlinePlayerActive];
+
     %orig;
 }
+
 - (void)nextVideo {
-    if ([[%c(YTMOfflinePlayerManager) sharedManager] isOfflinePlayerActive]) return;
+    [[%c(YTMOfflinePlayerManager) sharedManager]
+        markOnlinePlayerActive];
+
     %orig;
 }
+
 - (void)previousVideo {
-    if ([[%c(YTMOfflinePlayerManager) sharedManager] isOfflinePlayerActive]) return;
+    [[%c(YTMOfflinePlayerManager) sharedManager]
+        markOnlinePlayerActive];
+
     %orig;
 }
+
 %end
+
+
+#pragma mark - Remote control center
 
 %hook YTRemoteControlCenter
-- (id)handleNextCommand:(id)event {
-    if ([[%c(YTMOfflinePlayerManager) sharedManager] isOfflinePlayerActive]) return nil;
-    return %orig;
+
+- (void)play {
+    if ([[%c(YTMOfflinePlayerManager) sharedManager]
+            isOfflinePlayerActive]) {
+        return;
+    }
+
+    %orig;
 }
-- (id)handlePreviousCommand:(id)event {
-    if ([[%c(YTMOfflinePlayerManager) sharedManager] isOfflinePlayerActive]) return nil;
-    return %orig;
+
+- (void)pause {
+    if ([[%c(YTMOfflinePlayerManager) sharedManager]
+            isOfflinePlayerActive]) {
+        return;
+    }
+
+    %orig;
 }
-- (id)handlePlayCommand:(id)event {
-    if ([[%c(YTMOfflinePlayerManager) sharedManager] isOfflinePlayerActive]) return nil;
-    return %orig;
+
+- (void)next {
+    if ([[%c(YTMOfflinePlayerManager) sharedManager]
+            isOfflinePlayerActive]) {
+        return;
+    }
+
+    %orig;
 }
-- (id)handlePauseCommand:(id)event {
-    if ([[%c(YTMOfflinePlayerManager) sharedManager] isOfflinePlayerActive]) return nil;
-    return %orig;
+
+- (void)previous {
+    if ([[%c(YTMOfflinePlayerManager) sharedManager]
+            isOfflinePlayerActive]) {
+        return;
+    }
+
+    %orig;
 }
+
 %end
+
+
+#pragma mark - System media controls
 
 %hook YTSystemMediaControlHandler
-- (id)handleNextTrackCommand:(id)event {
-    if ([[%c(YTMOfflinePlayerManager) sharedManager] isOfflinePlayerActive]) return nil;
-    return %orig;
+
+- (void)play {
+    if ([[%c(YTMOfflinePlayerManager) sharedManager]
+            isOfflinePlayerActive]) {
+        return;
+    }
+
+    %orig;
 }
-- (id)handlePreviousTrackCommand:(id)event {
-    if ([[%c(YTMOfflinePlayerManager) sharedManager] isOfflinePlayerActive]) return nil;
-    return %orig;
+
+- (void)pause {
+    if ([[%c(YTMOfflinePlayerManager) sharedManager]
+            isOfflinePlayerActive]) {
+        return;
+    }
+
+    %orig;
 }
-- (id)handlePlayCommand:(id)event {
-    if ([[%c(YTMOfflinePlayerManager) sharedManager] isOfflinePlayerActive]) return nil;
-    return %orig;
+
+- (void)next {
+    if ([[%c(YTMOfflinePlayerManager) sharedManager]
+            isOfflinePlayerActive]) {
+        return;
+    }
+
+    %orig;
 }
-- (id)handlePauseCommand:(id)event {
-    if ([[%c(YTMOfflinePlayerManager) sharedManager] isOfflinePlayerActive]) return nil;
-    return %orig;
+
+- (void)previous {
+    if ([[%c(YTMOfflinePlayerManager) sharedManager]
+            isOfflinePlayerActive]) {
+        return;
+    }
+
+    %orig;
 }
+
 %end
 
+
+#pragma mark - UIResponder remote controls
+
 %hook UIResponder
+
 - (void)remoteControlReceivedWithEvent:(UIEvent *)event {
-    if ([[%c(YTMOfflinePlayerManager) sharedManager] isOfflinePlayerActive]) {
+    if ([[%c(YTMOfflinePlayerManager) sharedManager]
+            isOfflinePlayerActive]) {
+
         if (![self isKindOfClass:[%c(YTMOfflinePlayerManager) class]]) {
             return;
         }
     }
+
     %orig;
 }
+
 %end
