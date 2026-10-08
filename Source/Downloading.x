@@ -611,6 +611,53 @@ static NSString *extractPlaylistIdFromObject(id obj, NSMutableSet *visited, NSUI
         return nil;
     }
 
+    // Newer YouTube Music builds often keep the browse/playlist model in
+    // private object ivars instead of exposing it through selectors. Inspect
+    // object-valued ivars as a fallback so ELMNodeController can still lead
+    // us to playlistId/browseId.
+    Class cls = [obj class];
+    NSUInteger ivarCount = 0;
+    Ivar *ivars = class_copyIvarList(cls, &ivarCount);
+    for (NSUInteger i = 0; i < ivarCount; i++) {
+        Ivar ivar = ivars[i];
+        const char *type = ivar_getTypeEncoding(ivar);
+        if (!type || type[0] != '@') continue;
+
+        id child = object_getIvar(obj, ivar);
+        if (!child || child == obj) continue;
+
+        NSString *found = extractPlaylistIdFromObject(child, visited, depth + 1);
+        if (found) {
+            free(ivars);
+            return found;
+        }
+    }
+    if (ivars) free(ivars);
+
+    // Repeat for superclasses; ELM objects frequently inherit their payload
+    // storage from a base controller/model class.
+    Class superCls = class_getSuperclass(cls);
+    while (superCls && superCls != [NSObject class]) {
+        NSUInteger superCount = 0;
+        Ivar *superIvars = class_copyIvarList(superCls, &superCount);
+        for (NSUInteger i = 0; i < superCount; i++) {
+            Ivar ivar = superIvars[i];
+            const char *type = ivar_getTypeEncoding(ivar);
+            if (!type || type[0] != '@') continue;
+
+            id child = object_getIvar(obj, ivar);
+            if (!child || child == obj) continue;
+
+            NSString *found = extractPlaylistIdFromObject(child, visited, depth + 1);
+            if (found) {
+                if (superIvars) free(superIvars);
+                return found;
+            }
+        }
+        if (superIvars) free(superIvars);
+        superCls = class_getSuperclass(superCls);
+    }
+
     for (NSString *selName in @[
         @"playlistId", @"browseId", @"browseEndpoint", @"navigationEndpoint",
         @"endpoint", @"command", @"serviceEndpoint", @"watchEndpoint",
