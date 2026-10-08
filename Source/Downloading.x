@@ -27,21 +27,11 @@ static BOOL YTMU(NSString *key) {
 
 static __weak id gActivePlayerResponse = nil;
 static __weak id gActivePlayerVC = nil;
-static NSString *gActivePlaylistId = nil;
-
-static NSString *extractPlaylistIdFromObject(id obj, NSMutableSet *visited, NSUInteger depth);
 
 %hook YTPlayerViewController
 - (void)setPlayerResponse:(id)response {
     gActivePlayerResponse = response;
     gActivePlayerVC = self;
-
-    gActivePlaylistId = nil;
-    if (response) {
-        NSMutableSet *playlistVisited = [NSMutableSet set];
-        gActivePlaylistId = extractPlaylistIdFromObject(response, playlistVisited, 0);
-    }
-
     %orig;
 }
 %end
@@ -49,23 +39,10 @@ static NSString *extractPlaylistIdFromObject(id obj, NSMutableSet *visited, NSUI
 %hook YTMWatchViewController
 - (void)setPlayerResponse:(id)response {
     gActivePlayerResponse = response;
-
-    gActivePlaylistId = nil;
-    if (response) {
-        NSMutableSet *playlistVisited = [NSMutableSet set];
-        gActivePlaylistId = extractPlaylistIdFromObject(response, playlistVisited, 0);
-    }
-
     %orig;
 }
 - (void)setPlayerViewController:(id)playerVC {
     gActivePlayerVC = playerVC;
-
-    if (!gActivePlaylistId && playerVC) {
-        NSMutableSet *playlistVisited = [NSMutableSet set];
-        gActivePlaylistId = extractPlaylistIdFromObject(playerVC, playlistVisited, 0);
-    }
-
     %orig;
 }
 %end
@@ -588,129 +565,41 @@ static void scanObjectForTracks(id obj, NSMutableArray *tracks, NSMutableSet *vi
 
 static BOOL isValidPlaylistBrowseID(NSString *value) {
     if (![value isKindOfClass:[NSString class]] || value.length == 0) return NO;
-
-    NSString *clean = [value stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
-    if (clean.length == 0) return NO;
-
-    NSString *upper = [clean uppercaseString];
-    if ([upper hasPrefix:@"VL"] || [upper hasPrefix:@"PL"] ||
-        [upper hasPrefix:@"OL"] || [upper hasPrefix:@"RD"] ||
-        [upper hasPrefix:@"UU"] || [upper hasPrefix:@"FL"] ||
-        [upper hasPrefix:@"LL"]) {
-        return YES;
-    }
-
-    return NO;
-}
-
-static NSString *extractPlaylistIdFromString(NSString *string) {
-    if (![string isKindOfClass:[NSString class]] || string.length == 0) return nil;
-
-    /*
-     * PoomSmart's YouTubeLegacy code extracts playlist IDs from an
-     * element-renderer's textual description (for example "&list=...").
-     * Newer YT Music ELM objects may expose the same data only through
-     * -description rather than a browseId/playlistId selector.
-     */
-
-    NSArray<NSString *> *patterns = @[
-        @"[?&]list=([A-Za-z0-9_-]+)",
-        @"\\\\?list=([A-Za-z0-9_-]+)",
-        @"[\"']playlistId[\"']\\s*[:=]\\s*[\"']([A-Za-z0-9_-]+)",
-        @"playlistId\\s*=\\s*([A-Za-z0-9_-]+)",
-        @"[\"']browseId[\"']\\s*[:=]\\s*[\"']((?:VL|PL|OL|RD|UU|FL|LL)[A-Za-z0-9_-]+)",
-        @"browseId\\s*=\\s*((?:VL|PL|OL|RD|UU|FL|LL)[A-Za-z0-9_-]+)"
-    ];
-
-    for (NSString *pattern in patterns) {
-        NSRegularExpression *regex = [NSRegularExpression regularExpressionWithPattern:pattern options:NSRegularExpressionCaseInsensitive error:nil];
-        if (!regex) continue;
-
-        NSTextCheckingResult *match = [regex firstMatchInString:string options:0 range:NSMakeRange(0, string.length)];
-        if (!match || match.numberOfRanges < 2) continue;
-
-        NSRange range = [match rangeAtIndex:1];
-        if (range.location == NSNotFound || range.length == 0) continue;
-
-        NSString *candidate = [string substringWithRange:range];
-        if ([candidate isKindOfClass:[NSString class]] && candidate.length > 0) {
-            // A list= URL normally contains the plain PL/OL/RD/... ID.
-            // browseId may already be VL-prefixed.
-            NSString *upper = [candidate uppercaseString];
-            if ([upper hasPrefix:@"VL"] || [upper hasPrefix:@"PL"] ||
-                [upper hasPrefix:@"OL"] || [upper hasPrefix:@"RD"] ||
-                [upper hasPrefix:@"UU"] || [upper hasPrefix:@"FL"] ||
-                [upper hasPrefix:@"LL"]) {
-                return candidate;
-            }
-        }
-    }
-
-    // Sometimes the entire string itself is the browse ID.
-    if (isValidPlaylistBrowseID(string)) return string;
-
-    return nil;
+    NSString *upper = [value uppercaseString];
+    return [upper hasPrefix:@"VL"] || [upper hasPrefix:@"PL"] || [upper hasPrefix:@"OL"] || [upper hasPrefix:@"RD"] || [upper hasPrefix:@"UU"];
 }
 
 static NSString *extractPlaylistIdFromObject(id obj, NSMutableSet *visited, NSUInteger depth) {
-    if (!obj || depth > 18) return nil;
+    if (!obj || depth > 12) return nil;
 
     if ([obj isKindOfClass:[NSString class]]) {
-        return extractPlaylistIdFromString((NSString *)obj);
+        return isValidPlaylistBrowseID(obj) ? obj : nil;
     }
 
     NSValue *ptrVal = [NSValue valueWithNonretainedObject:obj];
     if ([visited containsObject:ptrVal]) return nil;
     [visited addObject:ptrVal];
-
-    if (visited.count > 10000) return nil;
-
-    /*
-     * Most important path: ELM/YTI renderer description.
-     * A renderer description can contain a complete watch URL such as:
-     * https://music.youtube.com/watch?v=...&list=PL...
-     */
-    NSString *description = [obj description];
-    NSString *fromDescription = extractPlaylistIdFromString(description);
-    if (fromDescription) return fromDescription;
+    if (visited.count > 4000) return nil;
 
     if ([obj isKindOfClass:[NSDictionary class]]) {
         NSDictionary *dict = (NSDictionary *)obj;
 
-        // Exact fields first.
-        for (NSString *key in @[
-            @"playlistId", @"playlistID", @"listId",
-            @"browseId", @"browseID"
-        ]) {
+        for (NSString *key in @[@"playlistId", @"browseId"]) {
             id value = dict[key];
-            if ([value isKindOfClass:[NSString class]]) {
-                NSString *found = extractPlaylistIdFromString(value);
-                if (found) return found;
+            if ([value isKindOfClass:[NSString class]] && isValidPlaylistBrowseID(value)) {
+                return value;
             }
         }
 
-        // Exact navigation containers.
-        for (NSString *key in @[
-            @"watchPlaylistEndpoint",
-            @"watchEndpoint",
-            @"browseEndpoint",
-            @"navigationEndpoint",
-            @"endpoint",
-            @"command",
-            @"serviceEndpoint",
-            @"currentVideoEndpoint"
-        ]) {
-            id value = dict[key];
-            NSString *found = extractPlaylistIdFromObject(value, visited, depth + 1);
+        for (NSString *key in @[@"browseEndpoint", @"navigationEndpoint", @"endpoint", @"command", @"serviceEndpoint", @"watchEndpoint"]) {
+            NSString *found = extractPlaylistIdFromObject(dict[key], visited, depth + 1);
             if (found) return found;
         }
 
-        // Finally recurse through all values.
         for (id value in dict.allValues) {
             NSString *found = extractPlaylistIdFromObject(value, visited, depth + 1);
             if (found) return found;
         }
-
         return nil;
     }
 
@@ -722,39 +611,37 @@ static NSString *extractPlaylistIdFromObject(id obj, NSMutableSet *visited, NSUI
         return nil;
     }
 
-    /*
-     * Prefer well-known playlist/navigation selectors.
-     */
-    for (NSString *selName in @[
-        @"playlistId", @"playlistID", @"listId",
-        @"browseId", @"browseID",
-        @"playlist", @"watchPlaylistEndpoint",
-        @"watchEndpoint", @"browseEndpoint",
-        @"navigationEndpoint", @"currentVideoEndpoint",
-        @"command", @"endpoint", @"serviceEndpoint",
-        @"node", @"data", @"model", @"content",
-        @"renderer", @"response", @"browseResponse"
-    ]) {
-        SEL sel = NSSelectorFromString(selName);
-        if (![obj respondsToSelector:sel]) continue;
-
-        id child = callObjectSelector(obj, sel);
-        NSString *found = extractPlaylistIdFromObject(child, visited, depth + 1);
-        if (found) return found;
-    }
-
-    /*
-     * Then inspect object-valued ivars. This is intentionally after
-     * -description/selectors so arbitrary model state does not win over
-     * the navigation object that belongs to the tapped renderer.
-     */
+    // Newer YouTube Music builds often keep the browse/playlist model in
+    // private object ivars instead of exposing it through selectors. Inspect
+    // object-valued ivars as a fallback so ELMNodeController can still lead
+    // us to playlistId/browseId.
     Class cls = [obj class];
-    for (Class current = cls; current && current != [NSObject class]; current = class_getSuperclass(current)) {
-        NSUInteger ivarCount = 0;
-        Ivar *ivars = class_copyIvarList(current, &ivarCount);
+    NSUInteger ivarCount = 0;
+    Ivar *ivars = class_copyIvarList(cls, &ivarCount);
+    for (NSUInteger i = 0; i < ivarCount; i++) {
+        Ivar ivar = ivars[i];
+        const char *type = ivar_getTypeEncoding(ivar);
+        if (!type || type[0] != '@') continue;
 
-        for (NSUInteger i = 0; i < ivarCount; i++) {
-            Ivar ivar = ivars[i];
+        id child = object_getIvar(obj, ivar);
+        if (!child || child == obj) continue;
+
+        NSString *found = extractPlaylistIdFromObject(child, visited, depth + 1);
+        if (found) {
+            free(ivars);
+            return found;
+        }
+    }
+    if (ivars) free(ivars);
+
+    // Repeat for superclasses; ELM objects frequently inherit their payload
+    // storage from a base controller/model class.
+    Class superCls = class_getSuperclass(cls);
+    while (superCls && superCls != [NSObject class]) {
+        NSUInteger superCount = 0;
+        Ivar *superIvars = class_copyIvarList(superCls, &superCount);
+        for (NSUInteger i = 0; i < superCount; i++) {
+            Ivar ivar = superIvars[i];
             const char *type = ivar_getTypeEncoding(ivar);
             if (!type || type[0] != '@') continue;
 
@@ -763,51 +650,53 @@ static NSString *extractPlaylistIdFromObject(id obj, NSMutableSet *visited, NSUI
 
             NSString *found = extractPlaylistIdFromObject(child, visited, depth + 1);
             if (found) {
-                free(ivars);
+                if (superIvars) free(superIvars);
                 return found;
             }
         }
+        if (superIvars) free(superIvars);
+        superCls = class_getSuperclass(superCls);
+    }
 
-        if (ivars) free(ivars);
+    for (NSString *selName in @[
+        @"playlistId", @"browseId", @"browseEndpoint", @"navigationEndpoint",
+        @"endpoint", @"command", @"serviceEndpoint", @"watchEndpoint",
+        @"node", @"data", @"model", @"content", @"renderer", @"playlist",
+        @"response", @"browseResponse", @"sectionListRenderer", @"tabs", @"tabRenderer"
+    ]) {
+        SEL sel = NSSelectorFromString(selName);
+        if (![obj respondsToSelector:sel]) continue;
+        id child = callObjectSelector(obj, sel);
+        NSString *found = extractPlaylistIdFromObject(child, visited, depth + 1);
+        if (found) return found;
     }
 
     if ([obj isKindOfClass:[UIViewController class]]) {
         UIViewController *vc = (UIViewController *)obj;
-        if (gActivePlayerVC && vc == gActivePlayerVC) {
-            /*
-             * Still inspect the player VC itself because its response may
-             * carry the playlist context. We only avoid descending into the
-             * player's view hierarchy here.
-             */
-        }
+        if (gActivePlayerVC && vc == gActivePlayerVC) return nil;
 
-        if (vc.parentViewController) {
-            NSString *found = extractPlaylistIdFromObject(vc.parentViewController, visited, depth + 1);
+        NSString *found = extractPlaylistIdFromObject(vc.view, visited, depth + 1);
+        if (found) return found;
+
+        for (UIViewController *child in vc.childViewControllers) {
+            if (gActivePlayerVC && child == gActivePlayerVC) continue;
+            found = extractPlaylistIdFromObject(child, visited, depth + 1);
             if (found) return found;
         }
 
         if (vc.presentedViewController) {
-            NSString *found = extractPlaylistIdFromObject(vc.presentedViewController, visited, depth + 1);
+            found = extractPlaylistIdFromObject(vc.presentedViewController, visited, depth + 1);
             if (found) return found;
         }
 
-        for (UIViewController *child in vc.childViewControllers) {
-            if (gActivePlayerVC && child == gActivePlayerVC && vc != gActivePlayerVC) continue;
-            NSString *found = extractPlaylistIdFromObject(child, visited, depth + 1);
-            if (found) return found;
-        }
-
-        /*
-         * Descend into the view only after controller/model properties.
-         */
-        if (vc.view) {
-            NSString *found = extractPlaylistIdFromObject(vc.view, visited, depth + 1);
+        if (vc.parentViewController) {
+            found = extractPlaylistIdFromObject(vc.parentViewController, visited, depth + 1);
             if (found) return found;
         }
     } else if ([obj isKindOfClass:[UIView class]]) {
         UIView *view = (UIView *)obj;
 
-        if (class_getInstanceVariable([view class], "_controller") != NULL) {
+        if (class_getInstanceVariable([view class], @"_controller") != NULL) {
             id controller = [view valueForKey:@"_controller"];
             NSString *found = extractPlaylistIdFromObject(controller, visited, depth + 1);
             if (found) return found;
@@ -821,11 +710,6 @@ static NSString *extractPlaylistIdFromObject(id obj, NSMutableSet *visited, NSUI
 
         if (view.superview) {
             NSString *found = extractPlaylistIdFromObject(view.superview, visited, depth + 1);
-            if (found) return found;
-        }
-
-        for (UIView *subview in view.subviews) {
-            NSString *found = extractPlaylistIdFromObject(subview, visited, depth + 1);
             if (found) return found;
         }
     }
@@ -877,35 +761,26 @@ static NSString *findContinuationToken(id obj, NSMutableSet *visited, NSUInteger
 }
 
 static NSString *extractPlaylistIdFromHierarchy(UIView *sourceView) {
-    if (gActivePlaylistId.length > 0 && isValidPlaylistBrowseID(gActivePlaylistId)) {
-        return gActivePlaylistId;
-    }
-
     NSMutableSet *visited = [NSMutableSet set];
 
-    if (sourceView) {
-        NSString *playlistId = extractPlaylistIdFromObject(sourceView, visited, 0);
-        if (playlistId) return playlistId;
+    // Start from the actual tapped view. The playlist ID may live in the ELM node/controller.
+    NSString *playlistId = extractPlaylistIdFromObject(sourceView, visited, 0);
+    if (playlistId) return playlistId;
+
+    UIViewController *vc = nil;
+    if (sourceView && [sourceView respondsToSelector:@selector(_viewControllerForAncestor)]) {
+        vc = [sourceView _viewControllerForAncestor];
     }
 
-    if (gActivePlayerVC) {
-        NSString *playlistId = extractPlaylistIdFromObject(gActivePlayerVC, visited, 0);
-        if (playlistId) return playlistId;
-    }
-
-    if (gActivePlayerResponse) {
-        NSString *playlistId = extractPlaylistIdFromObject(gActivePlayerResponse, visited, 0);
-        if (playlistId) return playlistId;
-    }
+    playlistId = extractPlaylistIdFromObject(vc, visited, 0);
+    if (playlistId) return playlistId;
 
     UIWindow *window = [UIApplication sharedApplication].keyWindow;
-    if (window && window.rootViewController) {
-        UIViewController *top = window.rootViewController;
-        while (top.presentedViewController) {
-            top = top.presentedViewController;
-        }
-
-        NSString *playlistId = extractPlaylistIdFromObject(top, visited, 0);
+    UIViewController *root = window.rootViewController;
+    if (root) {
+        UIViewController *top = root;
+        while (top.presentedViewController) top = top.presentedViewController;
+        playlistId = extractPlaylistIdFromObject(top, visited, 0);
         if (playlistId) return playlistId;
     }
 
@@ -1051,7 +926,7 @@ static NSArray<NSDictionary *> *extractPlaylistTracks(UIView *sourceView) {
     NSString *playlistId = extractPlaylistIdFromHierarchy(sourceView);
     NSMutableArray<NSDictionary *> *tracks = [NSMutableArray array];
 
-    NSURL *url = [NSURL URLWithString:@"https://music.youtube.com/youtubei/v1/browse?key=AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8"];
+    NSURL *url = [NSURL URLWithString:@"https://music.youtube.com/youtubei/v1/browse"];
     NSURLSession *session = [NSURLSession sharedSession];
     NSDictionary *context = @{
         @"client": @{
@@ -1088,37 +963,8 @@ static NSArray<NSDictionary *> *extractPlaylistTracks(UIView *sourceView) {
             request.HTTPMethod = @"POST";
             [request setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
             [request setValue:@"https://music.youtube.com" forHTTPHeaderField:@"Origin"];
-            [request setValue:@"https://music.youtube.com" forHTTPHeaderField:@"X-Origin"];
             [request setValue:@"https://music.youtube.com" forHTTPHeaderField:@"Referer"];
             [request setValue:@"Mozilla/5.0 (iPhone; CPU iPhone OS 16_5 like Mac OS X) AppleWebKit/605.1.15" forHTTPHeaderField:@"User-Agent"];
-
-            // Public YouTube Music WEB_REMIX API key.
-            [request setValue:@"AIzaSyAO_FJ2SlqU8Q4STEHLGCilw_Y9_11qcW8" forHTTPHeaderField:@"X-Goog-Api-Key"];
-
-            NSString *browseCookieHeader = nil;
-            NSMutableArray<NSString *> *cookieParts = [NSMutableArray array];
-            for (NSHTTPCookie *cookie in [[NSHTTPCookieStorage sharedHTTPCookieStorage] cookies]) {
-                NSString *domain = cookie.domain.lowercaseString;
-                if ([domain containsString:@"youtube.com"]) {
-                    [cookieParts addObject:[NSString stringWithFormat:@"%@=%@", cookie.name, cookie.value]];
-                }
-            }
-            if (cookieParts.count > 0) {
-                browseCookieHeader = [cookieParts componentsJoinedByString:@"; "];
-                [request setValue:browseCookieHeader forHTTPHeaderField:@"Cookie"];
-            }
-
-            NSString *sapisid = nil;
-            for (NSHTTPCookie *cookie in [[NSHTTPCookieStorage sharedHTTPCookieStorage] cookies]) {
-                if ([cookie.name isEqualToString:@"SAPISID"]) {
-                    sapisid = cookie.value;
-                    break;
-                }
-            }
-            NSString *authHeader = generateSAPISIDHASH(sapisid, @"https://music.youtube.com");
-            if (authHeader.length > 0) {
-                [request setValue:authHeader forHTTPHeaderField:@"Authorization"];
-            }
 
             request.HTTPBody = [NSJSONSerialization dataWithJSONObject:bodyDict options:0 error:nil];
 
@@ -1153,18 +999,6 @@ static NSArray<NSDictionary *> *extractPlaylistTracks(UIView *sourceView) {
             continuation = nextToken;
         }
 
-        if (tracks.count > 0) return tracks;
-    }
-
-    // If a playlist context is already present in the current player response,
-    // its renderer tree can contain the playlist panel directly.
-    if (gActivePlayerResponse) {
-        if ([gActivePlayerResponse isKindOfClass:[NSDictionary class]]) {
-            extractTracksFromJSONObject(gActivePlayerResponse, tracks);
-        } else {
-            NSMutableSet *playerVisited = [NSMutableSet set];
-            scanObjectForTracks(gActivePlayerResponse, tracks, playerVisited);
-        }
         if (tracks.count > 0) return tracks;
     }
 
@@ -1304,10 +1138,7 @@ static NSArray<NSDictionary *> *extractPlaylistTracks(UIView *sourceView) {
 
                 YTAlertView *alertView = [%c(YTAlertView) infoDialog];
                 alertView.title = @"Playlist Not Found";
-                NSString *debugContext = gActivePlaylistId.length > 0
-                    ? [NSString stringWithFormat:@"Playlist ID %@ was found, but its tracks could not be loaded.", gActivePlaylistId]
-                    : @"No playlist ID was found in the current playlist view.";
-                alertView.subtitle = [NSString stringWithFormat:@"%@ The current track was not downloaded.", debugContext];
+                alertView.subtitle = @"Could not find the tracks in this playlist. The current track was not downloaded.";
                 [alertView show];
             });
             return;
