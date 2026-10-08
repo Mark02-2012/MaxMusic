@@ -563,66 +563,180 @@ static void scanObjectForTracks(id obj, NSMutableArray *tracks, NSMutableSet *vi
     }
 }
 
+static BOOL isValidPlaylistBrowseID(NSString *value) {
+    if (![value isKindOfClass:[NSString class]] || value.length == 0) return NO;
+    NSString *upper = [value uppercaseString];
+    return [upper hasPrefix:@"VL"] || [upper hasPrefix:@"PL"] || [upper hasPrefix:@"OL"] || [upper hasPrefix:@"RD"] || [upper hasPrefix:@"UU"];
+}
+
+static NSString *extractPlaylistIdFromObject(id obj, NSMutableSet *visited, NSUInteger depth) {
+    if (!obj || depth > 12) return nil;
+
+    if ([obj isKindOfClass:[NSString class]]) {
+        return isValidPlaylistBrowseID(obj) ? obj : nil;
+    }
+
+    NSValue *ptrVal = [NSValue valueWithNonretainedObject:obj];
+    if ([visited containsObject:ptrVal]) return nil;
+    [visited addObject:ptrVal];
+    if (visited.count > 4000) return nil;
+
+    if ([obj isKindOfClass:[NSDictionary class]]) {
+        NSDictionary *dict = (NSDictionary *)obj;
+
+        for (NSString *key in @[@"playlistId", @"browseId"]) {
+            id value = dict[key];
+            if ([value isKindOfClass:[NSString class]] && isValidPlaylistBrowseID(value)) {
+                return value;
+            }
+        }
+
+        for (NSString *key in @[@"browseEndpoint", @"navigationEndpoint", @"endpoint", @"command", @"serviceEndpoint", @"watchEndpoint"]) {
+            NSString *found = extractPlaylistIdFromObject(dict[key], visited, depth + 1);
+            if (found) return found;
+        }
+
+        for (id value in dict.allValues) {
+            NSString *found = extractPlaylistIdFromObject(value, visited, depth + 1);
+            if (found) return found;
+        }
+        return nil;
+    }
+
+    if ([obj isKindOfClass:[NSArray class]]) {
+        for (id item in (NSArray *)obj) {
+            NSString *found = extractPlaylistIdFromObject(item, visited, depth + 1);
+            if (found) return found;
+        }
+        return nil;
+    }
+
+    for (NSString *selName in @[
+        @"playlistId", @"browseId", @"browseEndpoint", @"navigationEndpoint",
+        @"endpoint", @"command", @"serviceEndpoint", @"watchEndpoint",
+        @"node", @"data", @"model", @"content", @"renderer", @"playlist",
+        @"response", @"browseResponse", @"sectionListRenderer", @"tabs", @"tabRenderer"
+    ]) {
+        SEL sel = NSSelectorFromString(selName);
+        if (![obj respondsToSelector:sel]) continue;
+        id child = callObjectSelector(obj, sel);
+        NSString *found = extractPlaylistIdFromObject(child, visited, depth + 1);
+        if (found) return found;
+    }
+
+    if ([obj isKindOfClass:[UIViewController class]]) {
+        UIViewController *vc = (UIViewController *)obj;
+        if (gActivePlayerVC && vc == gActivePlayerVC) return nil;
+
+        NSString *found = extractPlaylistIdFromObject(vc.view, visited, depth + 1);
+        if (found) return found;
+
+        for (UIViewController *child in vc.childViewControllers) {
+            if (gActivePlayerVC && child == gActivePlayerVC) continue;
+            found = extractPlaylistIdFromObject(child, visited, depth + 1);
+            if (found) return found;
+        }
+
+        if (vc.presentedViewController) {
+            found = extractPlaylistIdFromObject(vc.presentedViewController, visited, depth + 1);
+            if (found) return found;
+        }
+
+        if (vc.parentViewController) {
+            found = extractPlaylistIdFromObject(vc.parentViewController, visited, depth + 1);
+            if (found) return found;
+        }
+    } else if ([obj isKindOfClass:[UIView class]]) {
+        UIView *view = (UIView *)obj;
+
+        if (class_getInstanceVariable([view class], @"_controller") != NULL) {
+            id controller = [view valueForKey:@"_controller"];
+            NSString *found = extractPlaylistIdFromObject(controller, visited, depth + 1);
+            if (found) return found;
+        }
+
+        if ([view respondsToSelector:@selector(_viewControllerForAncestor)]) {
+            UIViewController *ancestorVC = [view _viewControllerForAncestor];
+            NSString *found = extractPlaylistIdFromObject(ancestorVC, visited, depth + 1);
+            if (found) return found;
+        }
+
+        if (view.superview) {
+            NSString *found = extractPlaylistIdFromObject(view.superview, visited, depth + 1);
+            if (found) return found;
+        }
+    }
+
+    return nil;
+}
+
+static NSString *findContinuationToken(id obj, NSMutableSet *visited, NSUInteger depth) {
+    if (!obj || depth > 16) return nil;
+
+    NSValue *ptrVal = [NSValue valueWithNonretainedObject:obj];
+    if ([visited containsObject:ptrVal]) return nil;
+    [visited addObject:ptrVal];
+    if (visited.count > 5000) return nil;
+
+    if ([obj isKindOfClass:[NSDictionary class]]) {
+        NSDictionary *dict = (NSDictionary *)obj;
+
+        NSDictionary *continuationCommand = dict[@"continuationCommand"];
+        if ([continuationCommand isKindOfClass:[NSDictionary class]]) {
+            NSString *token = continuationCommand[@"token"];
+            if ([token isKindOfClass:[NSString class]] && token.length > 0) return token;
+        }
+
+        id continuationEndpoint = dict[@"continuationEndpoint"];
+        if (continuationEndpoint) {
+            NSString *token = findContinuationToken(continuationEndpoint, visited, depth + 1);
+            if (token) return token;
+        }
+
+        NSDictionary *nextContinuationData = dict[@"nextContinuationData"];
+        if ([nextContinuationData isKindOfClass:[NSDictionary class]]) {
+            NSString *token = nextContinuationData[@"continuation"];
+            if ([token isKindOfClass:[NSString class]] && token.length > 0) return token;
+        }
+
+        for (id value in dict.allValues) {
+            NSString *token = findContinuationToken(value, visited, depth + 1);
+            if (token) return token;
+        }
+    } else if ([obj isKindOfClass:[NSArray class]]) {
+        for (id item in (NSArray *)obj) {
+            NSString *token = findContinuationToken(item, visited, depth + 1);
+            if (token) return token;
+        }
+    }
+
+    return nil;
+}
+
 static NSString *extractPlaylistIdFromHierarchy(UIView *sourceView) {
+    NSMutableSet *visited = [NSMutableSet set];
+
+    // Start from the actual tapped view. The playlist ID may live in the ELM node/controller.
+    NSString *playlistId = extractPlaylistIdFromObject(sourceView, visited, 0);
+    if (playlistId) return playlistId;
+
     UIViewController *vc = nil;
     if (sourceView && [sourceView respondsToSelector:@selector(_viewControllerForAncestor)]) {
         vc = [sourceView _viewControllerForAncestor];
     }
-    
-    NSMutableSet *visited = [NSMutableSet set];
-    NSMutableArray *queue = [NSMutableArray array];
-    
-    if (vc) [queue addObject:vc];
-    
+
+    playlistId = extractPlaylistIdFromObject(vc, visited, 0);
+    if (playlistId) return playlistId;
+
     UIWindow *window = [UIApplication sharedApplication].keyWindow;
     UIViewController *root = window.rootViewController;
     if (root) {
         UIViewController *top = root;
-        while (top.presentedViewController) {
-            top = top.presentedViewController;
-        }
-        if (top && ![queue containsObject:top]) [queue addObject:top];
-        if (root && ![queue containsObject:root]) [queue addObject:root];
+        while (top.presentedViewController) top = top.presentedViewController;
+        playlistId = extractPlaylistIdFromObject(top, visited, 0);
+        if (playlistId) return playlistId;
     }
-    
-    while (queue.count > 0) {
-        id obj = queue.firstObject;
-        [queue removeObjectAtIndex:0];
-        
-        if (!obj || [visited containsObject:[NSValue valueWithNonretainedObject:obj]]) continue;
-        [visited addObject:[NSValue valueWithNonretainedObject:obj]];
-        if (visited.count > 200) break;
-        
-        for (NSString *selName in @[@"playlistId", @"browseId"]) {
-            if ([obj respondsToSelector:NSSelectorFromString(selName)]) {
-                NSString *pid = callObjectSelector(obj, NSSelectorFromString(selName));
-                if ([pid isKindOfClass:[NSString class]] && pid.length > 0) {
-                    if ([pid hasPrefix:@"VL"] || [pid hasPrefix:@"PL"] || [pid hasPrefix:@"OL"] || [pid hasPrefix:@"RD"] || [pid hasPrefix:@"UU"]) {
-                        return pid;
-                    }
-                }
-            }
-        }
-        
-        for (NSString *selName in @[@"browseEndpoint", @"endpoint", @"navigationEndpoint", @"command"]) {
-            if ([obj respondsToSelector:NSSelectorFromString(selName)]) {
-                id ep = callObjectSelector(obj, NSSelectorFromString(selName));
-                if (ep) [queue addObject:ep];
-            }
-        }
-        
-        if ([obj isKindOfClass:[UIViewController class]]) {
-            UIViewController *vcObj = (UIViewController *)obj;
-            if (gActivePlayerVC && vcObj == gActivePlayerVC) continue;
-            for (UIViewController *child in vcObj.childViewControllers) {
-                if (gActivePlayerVC && child == gActivePlayerVC) continue;
-                [queue addObject:child];
-            }
-            if (vcObj.parentViewController) [queue addObject:vcObj.parentViewController];
-            if (vcObj.presentingViewController) [queue addObject:vcObj.presentingViewController];
-        }
-    }
-    
+
     return nil;
 }
 
@@ -763,67 +877,96 @@ static void extractTracksFromJSONObject(id obj, NSMutableArray *tracks) {
 
 static NSArray<NSDictionary *> *extractPlaylistTracks(UIView *sourceView) {
     NSString *playlistId = extractPlaylistIdFromHierarchy(sourceView);
-    
-    if (playlistId && playlistId.length > 0) {
-        NSMutableArray<NSDictionary *> *tracks = [NSMutableArray array];
-        
-        // Call InnerTube browse API
+    NSMutableArray<NSDictionary *> *tracks = [NSMutableArray array];
+
+    NSURL *url = [NSURL URLWithString:@"https://music.youtube.com/youtubei/v1/browse"];
+    NSURLSession *session = [NSURLSession sharedSession];
+    NSDictionary *context = @{
+        @"client": @{
+            @"clientName": @"WEB_REMIX",
+            @"clientVersion": @"1.20231214.00.00",
+            @"hl": @"en",
+            @"gl": @"US"
+        }
+    };
+
+    // API path: retrieve the playlist page and follow continuation tokens for long playlists.
+    if (playlistId.length > 0) {
         NSString *browseId = playlistId;
-        if ([browseId hasPrefix:@"PL"] && ![browseId hasPrefix:@"VL"]) {
+        NSString *upper = [browseId uppercaseString];
+        if ([upper hasPrefix:@"PL"] && ![upper hasPrefix:@"VL"]) {
             browseId = [NSString stringWithFormat:@"VL%@", browseId];
         }
-        
-        NSURL *url = [NSURL URLWithString:@"https://music.youtube.com/youtubei/v1/browse"];
-        NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
-        request.HTTPMethod = @"POST";
-        [request setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
-        [request setValue:@"https://music.youtube.com" forHTTPHeaderField:@"Origin"];
-        [request setValue:@"https://music.youtube.com" forHTTPHeaderField:@"Referer"];
-        [request setValue:@"Mozilla/5.0 (iPhone; CPU iPhone OS 16_5 like Mac OS X) AppleWebKit/605.1.15" forHTTPHeaderField:@"User-Agent"];
-        
-        NSDictionary *bodyDict = @{
-            @"context": @{
-                @"client": @{
-                    @"clientName": @"WEB_REMIX",
-                    @"clientVersion": @"1.20231214.00.00",
-                    @"hl": @"en",
-                    @"gl": @"US"
-                }
-            },
-            @"browseId": browseId
-        };
-        
-        NSData *bodyData = [NSJSONSerialization dataWithJSONObject:bodyDict options:0 error:nil];
-        request.HTTPBody = bodyData;
-        
-        dispatch_semaphore_t sema = dispatch_semaphore_create(0);
-        __block NSData *responseData = nil;
-        
-        NSURLSessionDataTask *task = [[NSURLSession sharedSession] dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
-            if (!error && data) {
-                responseData = data;
+
+        NSString *continuation = nil;
+        NSString *lastContinuation = nil;
+        NSUInteger page = 0;
+
+        while (page < 100) {
+            NSMutableDictionary *bodyDict = [NSMutableDictionary dictionaryWithDictionary:@{
+                @"context": context
+            }];
+            if (continuation.length > 0) {
+                bodyDict[@"continuation"] = continuation;
+            } else {
+                bodyDict[@"browseId"] = browseId;
             }
-            dispatch_semaphore_signal(sema);
-        }];
-        [task resume];
-        dispatch_semaphore_wait(sema, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(15 * NSEC_PER_SEC)));
-        
-        if (responseData) {
+
+            NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
+            request.HTTPMethod = @"POST";
+            [request setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+            [request setValue:@"https://music.youtube.com" forHTTPHeaderField:@"Origin"];
+            [request setValue:@"https://music.youtube.com" forHTTPHeaderField:@"Referer"];
+            [request setValue:@"Mozilla/5.0 (iPhone; CPU iPhone OS 16_5 like Mac OS X) AppleWebKit/605.1.15" forHTTPHeaderField:@"User-Agent"];
+
+            request.HTTPBody = [NSJSONSerialization dataWithJSONObject:bodyDict options:0 error:nil];
+
+            dispatch_semaphore_t sema = dispatch_semaphore_create(0);
+            __block NSData *responseData = nil;
+            __block NSError *requestError = nil;
+
+            NSURLSessionDataTask *task = [session dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
+                if (data.length > 0) responseData = data;
+                requestError = error;
+                dispatch_semaphore_signal(sema);
+            }];
+            [task resume];
+            dispatch_semaphore_wait(sema, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(20 * NSEC_PER_SEC)));
+
+            if (requestError || responseData.length == 0) break;
+
             NSDictionary *json = [NSJSONSerialization JSONObjectWithData:responseData options:0 error:nil];
-            if ([json isKindOfClass:[NSDictionary class]]) {
-                extractTracksFromJSONObject(json, tracks);
-            }
+            if (![json isKindOfClass:[NSDictionary class]]) break;
+
+            NSUInteger before = tracks.count;
+            extractTracksFromJSONObject(json, tracks);
+
+            NSMutableSet *tokenVisited = [NSMutableSet set];
+            NSString *nextToken = findContinuationToken(json, tokenVisited, 0);
+
+            page++;
+            if (nextToken.length == 0 || [nextToken isEqualToString:lastContinuation]) break;
+            if (tracks.count == before && page > 1) break;
+
+            lastContinuation = nextToken;
+            continuation = nextToken;
         }
-        
+
         if (tracks.count > 0) return tracks;
     }
-    
-    // Fallback to UI scanning if API fails
-    NSMutableArray<NSDictionary *> *tracks = [NSMutableArray array];
+
+    // UI fallback: scan the tapped node and its playlist controller/view.
     NSMutableSet *visited = [NSMutableSet set];
-    if (sourceView) {
-        scanObjectForTracks(sourceView, tracks, visited);
+    if (sourceView) scanObjectForTracks(sourceView, tracks, visited);
+
+    UIViewController *vc = nil;
+    if (sourceView && [sourceView respondsToSelector:@selector(_viewControllerForAncestor)]) {
+        vc = [sourceView _viewControllerForAncestor];
     }
+    if (vc && !(gActivePlayerVC && vc == gActivePlayerVC)) {
+        scanObjectForTracks(vc, tracks, visited);
+    }
+
     return tracks;
 }
 
@@ -945,8 +1088,11 @@ static NSArray<NSDictionary *> *extractPlaylistTracks(UIView *sourceView) {
         if (tracks.count == 0) {
             dispatch_async(dispatch_get_main_queue(), ^{
                 [hud hideAnimated:YES];
-                hud.label.text = @"Downloading Track...";
-                [self downloadAudio:sourceView];
+
+                YTAlertView *alertView = [%c(YTAlertView) infoDialog];
+                alertView.title = @"Playlist Not Found";
+                alertView.subtitle = @"Could not find the tracks in this playlist. The current track was not downloaded.";
+                [alertView show];
             });
             return;
         }
