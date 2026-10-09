@@ -12,6 +12,16 @@
 - (void)viewDidLoad {
     [super viewDidLoad];
 
+    self.selectedAudioFiles = [NSMutableSet set];
+
+    // Persistent trash button in the top-right corner.
+    self.deleteSelectionButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    self.deleteSelectionButton.translatesAutoresizingMaskIntoConstraints = NO;
+    [self.deleteSelectionButton setImage:[UIImage systemImageNamed:@"trash.fill"] forState:UIControlStateNormal];
+    self.deleteSelectionButton.tintColor = [UIColor systemRedColor];
+    [self.deleteSelectionButton addTarget:self action:@selector(didTapDeleteSelectionButton) forControlEvents:UIControlEventTouchUpInside];
+    [self.view addSubview:self.deleteSelectionButton];
+
     self.tableView = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStyleInsetGrouped];
     self.tableView.translatesAutoresizingMaskIntoConstraints = NO;
     self.tableView.dataSource = self;
@@ -46,6 +56,10 @@
     [self.view addSubview:self.miniPlayerView];
 
     [NSLayoutConstraint activateConstraints:@[
+        [self.deleteSelectionButton.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:7],
+        [self.deleteSelectionButton.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-18],
+        [self.deleteSelectionButton.widthAnchor constraintEqualToConstant:36],
+        [self.deleteSelectionButton.heightAnchor constraintEqualToConstant:36],
         [self.tableView.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:54],
         [self.tableView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
         [self.tableView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
@@ -88,8 +102,66 @@
 
 - (void)segmentChanged:(UISegmentedControl *)sender {
     self.selectedPlaylistFilter = nil;
+    [self.selectedAudioFiles removeAllObjects];
+    self.isSelectingAudioFiles = NO;
+    [self updateDeleteSelectionButton];
     [self refreshAudioFiles];
     [self.tableView reloadData];
+}
+
+- (void)updateDeleteSelectionButton {
+    BOOL showingTracks = self.segmentedControl.selectedSegmentIndex == 0;
+    self.deleteSelectionButton.hidden = !showingTracks;
+    self.deleteSelectionButton.tintColor = [UIColor systemRedColor];
+    UIImage *icon = [UIImage systemImageNamed:self.isSelectingAudioFiles ? @"trash.fill" : @"trash"];
+    [self.deleteSelectionButton setImage:icon forState:UIControlStateNormal];
+    self.deleteSelectionButton.accessibilityLabel = self.isSelectingAudioFiles ? @"Delete selected downloads" : @"Select downloads to delete";
+}
+
+- (void)didTapDeleteSelectionButton {
+    if (self.segmentedControl.selectedSegmentIndex != 0) return;
+
+    if (!self.isSelectingAudioFiles) {
+        self.isSelectingAudioFiles = YES;
+        [self.selectedAudioFiles removeAllObjects];
+        [self updateDeleteSelectionButton];
+        [self.tableView reloadData];
+        return;
+    }
+
+    if (self.selectedAudioFiles.count == 0) {
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Nessuna canzone selezionata" message:@"Seleziona prima le canzoni da eliminare." preferredStyle:UIAlertControllerStyleAlert];
+        [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
+            self.isSelectingAudioFiles = NO;
+            [self.selectedAudioFiles removeAllObjects];
+            [self updateDeleteSelectionButton];
+            [self.tableView reloadData];
+        }]];
+        [self presentViewController:alert animated:YES completion:nil];
+        return;
+    }
+
+    NSSet *filesToDelete = [self.selectedAudioFiles copy];
+    NSURL *documentsURL = [[[NSFileManager defaultManager] URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask] lastObject];
+    NSURL *downloadsURL = [documentsURL URLByAppendingPathComponent:@"YTMusicUltimate" isDirectory:YES];
+    NSFileManager *fileManager = [NSFileManager defaultManager];
+
+    for (NSString *fileName in filesToDelete) {
+        NSURL *audioURL = [downloadsURL URLByAppendingPathComponent:fileName];
+        NSString *baseName = [fileName stringByDeletingPathExtension];
+        NSURL *artworkURL = [downloadsURL URLByAppendingPathComponent:[baseName stringByAppendingPathExtension:@"png"]];
+        [fileManager removeItemAtURL:audioURL error:nil];
+        [fileManager removeItemAtURL:artworkURL error:nil];
+        [YTMDownloadMetadata removeMetadataForFileName:fileName];
+    }
+
+    [self.selectedAudioFiles removeAllObjects];
+    self.isSelectingAudioFiles = NO;
+    [self updateDeleteSelectionButton];
+    [self refreshAudioFiles];
+    [self.tableView reloadData];
+    [self maybeShowEmptyState];
+    [[NSNotificationCenter defaultCenter] postNotificationName:@"ReloadDataNotification" object:nil];
 }
 
 - (void)maybeShowEmptyState {
@@ -259,17 +331,26 @@
 
             YTMOfflinePlayerManager *manager = [YTMOfflinePlayerManager sharedManager];
             BOOL isCurrentPlaying = [manager.currentFileName isEqualToString:fileName] && manager.isPlaying;
+            BOOL isSelectedForDeletion = [self.selectedAudioFiles containsObject:fileName];
+            cell.selectionStyle = self.isSelectingAudioFiles ? UITableViewCellSelectionStyleDefault : UITableViewCellSelectionStyleDefault;
 
-            if (isCurrentPlaying) {
+            if (self.isSelectingAudioFiles) {
+                cell.textLabel.textColor = [UIColor whiteColor];
+                cell.detailTextLabel.text = components.count >= 2 ? components[0] : @"Offline Track";
+                cell.accessoryView = nil;
+                cell.accessoryType = isSelectedForDeletion ? UITableViewCellAccessoryCheckmark : UITableViewCellAccessoryNone;
+                cell.tintColor = [UIColor systemRedColor];
+            } else if (isCurrentPlaying) {
                 cell.textLabel.textColor = [UIColor systemRedColor];
                 cell.detailTextLabel.text = [NSString stringWithFormat:@"▶ NOW PLAYING • %@", cell.detailTextLabel.text ?: @"Offline Track"];
-                
                 UIImageView *playingBadge = [[UIImageView alloc] initWithImage:[UIImage systemImageNamed:@"speaker.wave.3.fill"]];
                 playingBadge.tintColor = [UIColor systemRedColor];
                 playingBadge.frame = CGRectMake(0, 0, 24, 24);
                 cell.accessoryView = playingBadge;
+                cell.accessoryType = UITableViewCellAccessoryNone;
             } else {
                 cell.textLabel.textColor = [UIColor whiteColor];
+                cell.accessoryType = UITableViewCellAccessoryNone;
                 UIButton *addBtn = [UIButton buttonWithType:UIButtonTypeSystem];
                 addBtn.frame = CGRectMake(0, 0, 36, 36);
                 [addBtn setImage:[UIImage systemImageNamed:@"plus.circle.fill"] forState:UIControlStateNormal];
@@ -343,6 +424,17 @@
         if (indexPath.section == 0) {
             if (indexPath.row >= self.audioFiles.count) return;
 
+            NSString *fileName = self.audioFiles[indexPath.row];
+            if (self.isSelectingAudioFiles) {
+                if ([self.selectedAudioFiles containsObject:fileName]) {
+                    [self.selectedAudioFiles removeObject:fileName];
+                } else {
+                    [self.selectedAudioFiles addObject:fileName];
+                }
+                [tableView reloadRowsAtIndexPaths:@[indexPath] withRowAnimation:UITableViewRowAnimationNone];
+                return;
+            }
+
             YTMOfflinePlayerManager *manager = [YTMOfflinePlayerManager sharedManager];
 
             // If a song is currently playing, DO NOT change or restart the song! Just open the player!
@@ -397,7 +489,7 @@
 #pragma mark - Context Actions & Swipe
 
 - (UISwipeActionsConfiguration *)tableView:(UITableView *)tableView trailingSwipeActionsConfigurationForRowAtIndexPath:(NSIndexPath *)indexPath {
-    if (indexPath.section != 0) return nil;
+    if (self.isSelectingAudioFiles || indexPath.section != 0) return nil;
 
     if (self.segmentedControl.selectedSegmentIndex == 0) {
         NSString *fileName = self.audioFiles[indexPath.row];
