@@ -445,7 +445,6 @@
                 return;
             }
 
-            NSString *fileName = self.audioFiles[indexPath.row];
             NSString *videoId = [YTMDownloadMetadata videoIdForFileName:fileName] ?: fileName;
             [UIViewController ytm_playVideoWithID:videoId fromSender:[tableView cellForRowAtIndexPath:indexPath]];
 
