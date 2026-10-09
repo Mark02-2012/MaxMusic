@@ -15,7 +15,7 @@
 </p>
 
 <p align="center">
-The best fork of YTMusicUltimate that adds more tweaks for the YouTube Music app on iOS.
+The best fork of <a href="https://github.com/dayanch96/YTMusicUltimate">YTMusicUltimate</a> that adds more tweaks and more customizzation for downloaded songs for the YouTube Music app on iOS.
 
 <h2 p align="center">Disclaimer</h2>
 <p align="center">
@@ -23,15 +23,16 @@ The best fork of YTMusicUltimate that adds more tweaks for the YouTube Music app
 
 <h2 p align="center">More info</h2>
 <p align="center">
-   The updates will be released every new YTMusic/YTMusicUltimate version (estimated time for updates: 3-24 hours; VARIABLE), but also ON MY NEW TELEGRAM CHANNEL 👉<a href="https://t.me/Mark02workshop_official">LINK TO JOIN</a>👈
+   <strong>The updates will be released</strong> every new YTMusic/YTMusicUltimate version (estimated time for updates: 3-24 hours; VARIABLE), <strong>on my Telegram Channel 👉<a href="https://t.me/Mark02workshop_official">LINK TO JOIN</a>👈</strong>
 
 <p align="center">
-   <a href="#so-what-is-ytmultimate">More info about YTMUltimate+</a>
+   <a href="#so-.-.-what-is-maxmusic">More info about MaxMusic</a>
 
 ## Bug reporting
-**In the repo may be some issues, so please report any issue in the [Issues](https://github.com/Mark02-2012/YTMUltimatePLUS/issues) section.**
+**In the repo may be some issues, so please report any issue in the [Issues](https://github.com/Mark02-2012/MaxMusic/issues) section.**
 
 ## Download table
+FROM 1.2 I'LL NOT UPDATE IT ANYMORE (will remove the files from github soon), JOIN MY TELEGRAM CHANNEL 👉<a href="https://t.me/Mark02workshop_official">HERE</a>👈
 Implemented new fixed deb for working downloads from release 9.23.4 and 2.4.1! (Also in Actions)
 | Release | YTM version | YTMUltimate version | MaxMusic version |
 | :--- | :---: | :---: | :---: |
@@ -86,8 +87,8 @@ You can find pre-built IPAs in the [Download table](#download-table) and the [re
 
 If the github action works and you cannot find where you can download the result, you need to add /releases to the url of your forked repository. It'll probably look like this: https://github.com/YOURUSERNAME/YTMUltimatePLUS/releases, don't forget to replace the YOURUSERNAME part with your username on GitHub. It may seem invisible but if the github action is successful, IPA will be there as a draft relelase.
 
-## So.. What is MaxMusic?
-MaxMusic is simply a fork of the original [YTMusicUltimate](https://github.com/Dayanch96/YTMusicUltimate) by [Dayanch96](https://github.com/Dayanch96), but with more integrated tweaks and with downloads fixed in newer YTMusic versions.
+## So.. What is MaxMusic
+MaxMusic is simply a fork of the original [YTMusicUltimate](https://github.com/Dayanch96/YTMusicUltimate) by [Dayanch96](https://github.com/Dayanch96), but with more integrated tweaks and with custom downloads features.
 
 ## MaxMusic versions changelog
  * **1.0 (May 29 2026)**:
@@ -95,6 +96,14 @@ MaxMusic is simply a fork of the original [YTMusicUltimate](https://github.com/D
   
  * **1.1 (September 1 2026)**:
    <p>Changed name from YTMUltimate+ to MaxMusic</p>
+
+  * **1.2 (October 9 2026)**:
+   <p>Custom YTMusicUltimate tweak:
+      
+       - Added new custom download tab design, offline playlists and custom offline player for downloaded songs (all with Liquid Glass; credits to @Ilhamaji)
+       - New trash bin button to delete songs in download tab
+       - Working downloads in newer versions of YT Music
+       - New feature "Download All Playlist Tracks" but still not working, will fix in 1.3</p>
 
 ## Added tweaks
 >[!NOTE]
