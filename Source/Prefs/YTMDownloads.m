@@ -14,14 +14,6 @@
 
     self.selectedAudioFiles = [NSMutableSet set];
 
-    // Persistent trash button in the top-right corner.
-    self.deleteSelectionButton = [UIButton buttonWithType:UIButtonTypeSystem];
-    self.deleteSelectionButton.translatesAutoresizingMaskIntoConstraints = NO;
-    [self.deleteSelectionButton setImage:[UIImage systemImageNamed:@"trash.fill"] forState:UIControlStateNormal];
-    self.deleteSelectionButton.tintColor = [UIColor systemRedColor];
-    [self.deleteSelectionButton addTarget:self action:@selector(didTapDeleteSelectionButton) forControlEvents:UIControlEventTouchUpInside];
-    [self.view addSubview:self.deleteSelectionButton];
-
     self.tableView = [[UITableView alloc] initWithFrame:CGRectZero style:UITableViewStyleInsetGrouped];
     self.tableView.translatesAutoresizingMaskIntoConstraints = NO;
     self.tableView.dataSource = self;
@@ -38,9 +30,18 @@
     [self.segmentedControl addTarget:self action:@selector(segmentChanged:) forControlEvents:UIControlEventValueChanged];
     
     UIView *headerView = [[UIView alloc] initWithFrame:CGRectMake(0, 0, self.view.frame.size.width, 64)];
-    self.segmentedControl.frame = CGRectMake(16, 16, self.view.frame.size.width - 32, 36);
+    self.segmentedControl.frame = CGRectMake(16, 16, self.view.frame.size.width - 72, 36);
     self.segmentedControl.autoresizingMask = UIViewAutoresizingFlexibleWidth;
     [headerView addSubview:self.segmentedControl];
+
+    // Put the trash button in the table's visible header, beside the filter.
+    self.deleteSelectionButton = [UIButton buttonWithType:UIButtonTypeSystem];
+    self.deleteSelectionButton.frame = CGRectMake(MAX(0, self.view.frame.size.width - 48), 16, 36, 36);
+    self.deleteSelectionButton.autoresizingMask = UIViewAutoresizingFlexibleLeftMargin;
+    [self.deleteSelectionButton setImage:[UIImage systemImageNamed:@"trash.fill"] forState:UIControlStateNormal];
+    self.deleteSelectionButton.tintColor = [UIColor systemRedColor];
+    [self.deleteSelectionButton addTarget:self action:@selector(didTapDeleteSelectionButton) forControlEvents:UIControlEventTouchUpInside];
+    [headerView addSubview:self.deleteSelectionButton];
     self.tableView.tableHeaderView = headerView;
 
     self.miniPlayerView = [[YTMOfflineMiniPlayerView alloc] initWithFrame:CGRectZero];
@@ -56,10 +57,6 @@
     [self.view addSubview:self.miniPlayerView];
 
     [NSLayoutConstraint activateConstraints:@[
-        [self.deleteSelectionButton.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:7],
-        [self.deleteSelectionButton.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor constant:-18],
-        [self.deleteSelectionButton.widthAnchor constraintEqualToConstant:36],
-        [self.deleteSelectionButton.heightAnchor constraintEqualToConstant:36],
         [self.tableView.topAnchor constraintEqualToAnchor:self.view.safeAreaLayoutGuide.topAnchor constant:54],
         [self.tableView.leadingAnchor constraintEqualToAnchor:self.view.leadingAnchor],
         [self.tableView.trailingAnchor constraintEqualToAnchor:self.view.trailingAnchor],
@@ -73,6 +70,7 @@
 
     [self maybeShowEmptyState];
     [self refreshAudioFiles];
+    [self updateDeleteSelectionButton];
 
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(reloadData) name:@"ReloadDataNotification" object:nil];
     [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(onTrackChanged) name:YTMOfflinePlayerTrackDidChangeNotification object:nil];
@@ -81,6 +79,7 @@
 - (void)viewWillAppear:(BOOL)animated {
     [super viewWillAppear:animated];
     [self refreshAudioFiles];
+    [self updateDeleteSelectionButton];
     [self.tableView reloadData];
     if (self.miniPlayerView) {
         [self.miniPlayerView updateState];
@@ -94,7 +93,8 @@
         CGFloat width = self.view.bounds.size.width;
         if (width > 0) {
             header.frame = CGRectMake(0, 0, width, 64);
-            self.segmentedControl.frame = CGRectMake(16, 16, width - 32, 36);
+            self.segmentedControl.frame = CGRectMake(16, 16, width - 72, 36);
+            self.deleteSelectionButton.frame = CGRectMake(MAX(0, width - 48), 16, 36, 36);
             self.tableView.tableHeaderView = header;
         }
     }
