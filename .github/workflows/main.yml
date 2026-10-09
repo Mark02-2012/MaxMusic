@@ -66,7 +66,7 @@ jobs:
       - name: Hide sensitive inputs
         uses: levibostian/action-hide-sensitive-inputs@v1
         with:
-          exclude_inputs: bundle_id,display_name,enable_rymd,enable_ytmabc,enable_youmusicpip,enable_volumeboostyt,enable_vmb
+          exclude_inputs: bundle_id,display_name,enable_rymd,enable_ytmabc,enable_youmusicpip,enable_volumeboostyt
 
       - name: Validate IPA URL
         run: |
