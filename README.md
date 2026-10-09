@@ -26,7 +26,7 @@ The best fork of <a href="https://github.com/dayanch96/YTMusicUltimate">YTMusicU
    <strong>The updates will be released</strong> every new YTMusic/YTMusicUltimate version (estimated time for updates: 3-24 hours; VARIABLE), <strong>on my Telegram Channel 👉<a href="https://t.me/Mark02workshop_official">LINK TO JOIN</a>👈</strong>
 
 <p align="center">
-   <a href="#so-.-.-what-is-maxmusic">More info about MaxMusic</a>
+   <a href="#so-what-is-maxmusic">More info about MaxMusic</a>
 
 ## Bug reporting
 **In the repo may be some issues, so please report any issue in the [Issues](https://github.com/Mark02-2012/MaxMusic/issues) section.**
