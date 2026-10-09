@@ -24,7 +24,9 @@
     // Segmented control for All Tracks vs Playlists
     self.segmentedControl = [[UISegmentedControl alloc] initWithItems:@[@"All Tracks", @"Playlists"]];
     self.segmentedControl.selectedSegmentIndex = 0;
-    self.segmentedControl.selectedSegmentTintColor = [UIColor redColor];
+    // Use a subtle neutral highlight instead of inheriting the app's red tint;
+    // leave the native control styling intact for its Liquid Glass appearance.
+    self.segmentedControl.selectedSegmentTintColor = [UIColor colorWithWhite:1.0 alpha:0.12];
     [self.segmentedControl setTitleTextAttributes:@{NSForegroundColorAttributeName: [UIColor whiteColor]} forState:UIControlStateSelected];
     [self.segmentedControl setTitleTextAttributes:@{NSForegroundColorAttributeName: [[UIColor whiteColor] colorWithAlphaComponent:0.7]} forState:UIControlStateNormal];
     [self.segmentedControl addTarget:self action:@selector(segmentChanged:) forControlEvents:UIControlEventValueChanged];
@@ -130,7 +132,7 @@
     }
 
     if (self.selectedAudioFiles.count == 0) {
-        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"Nessuna canzone selezionata" message:@"Seleziona prima le canzoni da eliminare." preferredStyle:UIAlertControllerStyleAlert];
+        UIAlertController *alert = [UIAlertController alertControllerWithTitle:@"No Songs Selected" message:@"Please select at least one song to delete." preferredStyle:UIAlertControllerStyleAlert];
         [alert addAction:[UIAlertAction actionWithTitle:@"OK" style:UIAlertActionStyleDefault handler:^(UIAlertAction *action) {
             self.isSelectingAudioFiles = NO;
             [self.selectedAudioFiles removeAllObjects];
