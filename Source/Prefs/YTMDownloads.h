@@ -15,4 +15,7 @@
 @property (nonatomic, strong) YTMOfflineMiniPlayerView *miniPlayerView;
 @property (nonatomic, strong) UISegmentedControl *segmentedControl;
 @property (nonatomic, strong) NSString *selectedPlaylistFilter;
+@property (nonatomic, strong) UIButton *deleteSelectionButton;
+@property (nonatomic, strong) NSMutableSet<NSString *> *selectedAudioFiles;
+@property (nonatomic, assign) BOOL isSelectingAudioFiles;
 @end
