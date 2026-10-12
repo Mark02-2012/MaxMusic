@@ -135,7 +135,6 @@ jobs:
         if: ${{ inputs.enable_rymd }}
         run: |
           cd Return-YouTube-Music-Dislikes && make package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootless
-          mv output/*.deb ../*.deb
           
       - name: Build YTMABConfig
         if: ${{ inputs.enable_ytmabc }}
@@ -162,7 +161,7 @@ jobs:
         with:
           tag_name: DEBS(${{ github.run_number }})
           name: Built debs 
-          files: output/*
+          files: packages/*.deb
           draft: true
 
       - name: Output Release URL
