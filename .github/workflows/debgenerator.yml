@@ -166,7 +166,12 @@ jobs:
         with:
           tag_name: DEBS(${{ github.run_number }})
           name: Built debs 
-          files: *deb
+          files: |
+           rymd.deb
+           ytmabc.deb
+           youmusicpip.deb
+           volumeboostyt.deb
+           ytmult.deb
           draft: true
 
       - name: Output Release URL
