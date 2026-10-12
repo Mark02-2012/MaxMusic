@@ -1,5 +1,5 @@
-name: Build and Release deb files (beta)
-on:
+ name: Build and Release deb files beta
+ on:
   workflow_dispatch:
     inputs: 
       enable_ytmultcustom:
