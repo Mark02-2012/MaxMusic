@@ -156,12 +156,15 @@ jobs:
         run: |
           cd main && make clean package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootless SIDELOADING=1
 
+      - name: Move Files To Output Directory
+        run: mv build/*.deb output/
+
       - name: Create Release
         uses: softprops/action-gh-release@v3
         with:
           tag_name: DEBS(${{ github.run_number }})
           name: Built debs 
-          files: packages/*.deb
+          files: output/*.deb
           draft: true
 
       - name: Output Release URL
