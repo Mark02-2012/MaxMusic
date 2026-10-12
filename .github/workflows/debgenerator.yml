@@ -1,0 +1,174 @@
+name: Build and Release deb files (beta)
+on:
+  workflow_dispatch:
+    inputs: 
+      enable_ytmultcustom:
+       description: "Generate custom YTMusicUltimate"
+       type: boolean
+       required: true
+       default: false
+
+      enable_rymd:
+       description: "Generate Return-YouTube-Music-Dislikes (MaxMusic)"
+       type: boolean
+       required: true
+       default: false
+
+      enable_ytmabc:
+       description: "Generate YTMABConfig (MaxMusic)"
+       type: boolean
+       required: true
+       default: false
+
+      enable_youmusicpip:
+       description: "Generate YouMusicPiP (MaxMusic)"
+       type: boolean
+       required: true
+       default: false
+
+      enable_volumeboostyt:
+       description: "Generate VolumeBoostYT (MaxMusic)"
+       type: boolean
+       required: true
+       default: false
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build debs
+    runs-on: macos-latest
+    permissions:
+      contents: write
+
+    steps:
+      - name: Checkout Main
+        uses: actions/checkout@v6.0.2
+        with:
+          path: main
+          ref: ${{ github.ref }}
+          submodules: recursive
+
+      - name: Hide sensitive inputs
+        uses: levibostian/action-hide-sensitive-inputs@v1
+        with:
+          exclude_inputs: enable_rymd,enable_ytmabc,enable_youmusicpip,enable_volumeboostyt
+
+      - name: Install Dependencies
+        run: brew install make ldid
+
+      - name: Set PATH environment variables
+        run: |
+          echo "$(brew --prefix make)/libexec/gnubin" >> $GITHUB_PATH
+          echo "THEOS=${{ github.workspace }}/theos" >> $GITHUB_ENV
+
+      - name: Cache Theos
+        id: theos
+        uses: actions/cache@v5.0.3
+        env:
+          cache-name: theos_cache_9bc7340
+        with:
+          path: theos/
+          key: ${{ env.cache-name }}
+          restore-keys: ${{ env.cache-name }}
+
+      - name: Setup Theos
+        if: steps.theos.outputs.cache-hit != 'true'
+        uses: actions/checkout@v6.0.2
+        with:
+          repository: theos/theos
+          ref: 9bc73406cf80b711ef4d02c15ff1dedc4478a275
+          path: theos
+          submodules: recursive
+
+      - name: Clone YouTubeHeader
+        run: |
+          if [ -d "$THEOS/include/YouTubeHeader" ]; then
+            cd $THEOS/include/YouTubeHeader && git pull
+          else
+            cd $THEOS/include && git clone --quiet --depth=1 https://github.com/PoomSmart/YouTubeHeader.git
+          fi
+
+      - name: Clone PSHeader
+        run: |
+          if [ -d "$THEOS/include/PSHeader" ]; then
+            cd $THEOS/include/PSHeader && git pull
+          else
+            cd $THEOS/include && git clone --quiet --depth=1 https://github.com/PoomSmart/PSHeader.git
+          fi
+
+      - name: Clone YouTubeMusicHeader
+        run: |
+          if [ -d "$THEOS/include/YouTubeMusicHeader" ]; then
+            cd $THEOS/include/YouTubeMusicHeader && git pull
+          else
+            cd $THEOS/include && git clone --quiet --depth=1 https://github.com/PoomSmart/YouTubeMusicHeader.git
+          fi
+
+      - name: Clone Return-YouTube-Dislikes (for Return-YouTube-Music-Dislikes)
+        if: ${{ inputs.enable_rymd }}
+        run: git clone --quiet --depth=1 https://github.com/PoomSmart/Return-YouTube-Dislikes.git
+
+      - name: Clone YouPiP (for YouMusicPiP)
+        if: ${{ inputs.enable_youmusicpip }}
+        run: git clone --quiet --depth=1 https://github.com/PoomSmart/YouPiP.git
+
+      - name: Clone Return-YouTube-Music-Dislikes
+        if: ${{ inputs.enable_rymd }}
+        run: git clone --quiet --depth=1 https://github.com/PoomSmart/Return-YouTube-Music-Dislikes.git
+
+      - name: Clone YTMABConfig
+        if: ${{ inputs.enable_ytmabc }}
+        run: git clone --quiet --depth=1 https://github.com/PoomSmart/YTMABConfig.git
+
+      - name: Clone YouMusicPiP
+        if: ${{ inputs.enable_youmusicpip }}
+        run: git clone --quiet --depth=1 https://github.com/PoomSmart/YouMusicPiP.git
+
+      - name: Clone VolumeBoostYT
+        if: ${{ inputs.enable_volumeboostyt }}
+        run: git clone --quiet --depth=1 https://github.com/VasirakCalgux/VolumeBoostYT.git
+
+      - name: Build Return-YouTube-Music-Dislikes
+        if: ${{ inputs.enable_rymd }}
+        run: |
+          cd Return-YouTube-Music-Dislikes && make package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootless
+          mv packages/*.deb ../rymd.deb
+
+      - name: Build YTMABConfig
+        if: ${{ inputs.enable_ytmabc }}
+        run: |
+          cd YTMABConfig && make package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootless
+          mv packages/*.deb ../ytmabc.deb
+
+      - name: Build YouMusicPiP
+        if: ${{ inputs.enable_youmusicpip }}
+        run: |
+          cd YouMusicPiP && make package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootless
+          mv packages/*.deb ../youmusicpip.deb
+
+      - name: Build VolumeBoostYT
+        if: ${{ inputs.enable_volumeboostyt }}
+        run: |
+          cd VolumeBoostYT && make clean package DEBUG=0 FINALPACKAGE=1
+          mv packages/*.deb ../volumeboostyt.deb
+
+      - name: Build Custom YTMusicUltimate Tweak
+        if: ${{ inputs.enable_ytmultcustom }}
+        run: |
+          cd main && make clean package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootless SIDELOADING=1
+          mv packages/*.deb ../ytmult.deb
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v3
+        with:
+          tag_name: DEBS(${{ github.run_number }})
+          name: Built debs 
+          files: *deb
+          draft: true
+
+      - name: Output Release URL
+        run: |
+          echo "::notice::Release available at: https://github.com/${{ github.repository }}/releases"
