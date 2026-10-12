@@ -1,36 +1,37 @@
 name: Build and Release deb files (beta)
+
 on:
   workflow_dispatch:
-    inputs: 
+    inputs:
       enable_ytmultcustom:
-       description: "Generate custom YTMusicUltimate"
-       type: boolean
-       required: true
-       default: false
+        description: "Generate custom YTMusicUltimate"
+        type: boolean
+        required: true
+        default: false
 
       enable_rymd:
-       description: "Generate Return-YouTube-Music-Dislikes (MaxMusic)"
-       type: boolean
-       required: true
-       default: false
+        description: "Generate Return-YouTube-Music-Dislikes (MaxMusic)"
+        type: boolean
+        required: true
+        default: false
 
       enable_ytmabc:
-       description: "Generate YTMABConfig (MaxMusic)"
-       type: boolean
-       required: true
-       default: false
+        description: "Generate YTMABConfig (MaxMusic)"
+        type: boolean
+        required: true
+        default: false
 
       enable_youmusicpip:
-       description: "Generate YouMusicPiP (MaxMusic)"
-       type: boolean
-       required: true
-       default: false
+        description: "Generate YouMusicPiP (MaxMusic)"
+        type: boolean
+        required: true
+        default: false
 
       enable_volumeboostyt:
-       description: "Generate VolumeBoostYT (MaxMusic)"
-       type: boolean
-       required: true
-       default: false
+        description: "Generate VolumeBoostYT (MaxMusic)"
+        type: boolean
+        required: true
+        default: false
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -40,6 +41,7 @@ jobs:
   build:
     name: Build debs
     runs-on: macos-latest
+
     permissions:
       contents: write
 
@@ -61,8 +63,8 @@ jobs:
 
       - name: Set PATH environment variables
         run: |
-          echo "$(brew --prefix make)/libexec/gnubin" >> $GITHUB_PATH
-          echo "THEOS=${{ github.workspace }}/theos" >> $GITHUB_ENV
+          echo "$(brew --prefix make)/libexec/gnubin" >> "$GITHUB_PATH"
+          echo "THEOS=${{ github.workspace }}/theos" >> "$GITHUB_ENV"
 
       - name: Cache Theos
         id: theos
@@ -86,86 +88,115 @@ jobs:
       - name: Clone YouTubeHeader
         run: |
           if [ -d "$THEOS/include/YouTubeHeader" ]; then
-            cd $THEOS/include/YouTubeHeader && git pull
+            cd "$THEOS/include/YouTubeHeader" && git pull
           else
-            cd $THEOS/include && git clone --quiet --depth=1 https://github.com/PoomSmart/YouTubeHeader.git
+            cd "$THEOS/include" && git clone --quiet --depth=1 https://github.com/PoomSmart/YouTubeHeader.git
           fi
 
       - name: Clone PSHeader
         run: |
           if [ -d "$THEOS/include/PSHeader" ]; then
-            cd $THEOS/include/PSHeader && git pull
+            cd "$THEOS/include/PSHeader" && git pull
           else
-            cd $THEOS/include && git clone --quiet --depth=1 https://github.com/PoomSmart/PSHeader.git
+            cd "$THEOS/include" && git clone --quiet --depth=1 https://github.com/PoomSmart/PSHeader.git
           fi
 
       - name: Clone YouTubeMusicHeader
         run: |
           if [ -d "$THEOS/include/YouTubeMusicHeader" ]; then
-            cd $THEOS/include/YouTubeMusicHeader && git pull
+            cd "$THEOS/include/YouTubeMusicHeader" && git pull
           else
-            cd $THEOS/include && git clone --quiet --depth=1 https://github.com/PoomSmart/YouTubeMusicHeader.git
+            cd "$THEOS/include" && git clone --quiet --depth=1 https://github.com/PoomSmart/YouTubeMusicHeader.git
           fi
 
-      - name: Clone Return-YouTube-Dislikes (for Return-YouTube-Music-Dislikes)
+      - name: Clone Return-YouTube-Dislikes (dependency)
         if: ${{ inputs.enable_rymd }}
-        run: git clone --quiet --depth=1 https://github.com/PoomSmart/Return-YouTube-Dislikes.git
+        run: |
+          git clone --quiet --depth=1 https://github.com/PoomSmart/Return-YouTube-Dislikes.git
 
-      - name: Clone YouPiP (for YouMusicPiP)
+      - name: Clone YouPiP (dependency)
         if: ${{ inputs.enable_youmusicpip }}
-        run: git clone --quiet --depth=1 https://github.com/PoomSmart/YouPiP.git
+        run: |
+          git clone --quiet --depth=1 https://github.com/PoomSmart/YouPiP.git
 
       - name: Clone Return-YouTube-Music-Dislikes
         if: ${{ inputs.enable_rymd }}
-        run: git clone --quiet --depth=1 https://github.com/PoomSmart/Return-YouTube-Music-Dislikes.git
+        run: |
+          git clone --quiet --depth=1 https://github.com/PoomSmart/Return-YouTube-Music-Dislikes.git
 
       - name: Clone YTMABConfig
         if: ${{ inputs.enable_ytmabc }}
-        run: git clone --quiet --depth=1 https://github.com/PoomSmart/YTMABConfig.git
+        run: |
+          git clone --quiet --depth=1 https://github.com/PoomSmart/YTMABConfig.git
 
       - name: Clone YouMusicPiP
         if: ${{ inputs.enable_youmusicpip }}
-        run: git clone --quiet --depth=1 https://github.com/PoomSmart/YouMusicPiP.git
+        run: |
+          git clone --quiet --depth=1 https://github.com/PoomSmart/YouMusicPiP.git
 
       - name: Clone VolumeBoostYT
         if: ${{ inputs.enable_volumeboostyt }}
-        run: git clone --quiet --depth=1 https://github.com/VasirakCalgux/VolumeBoostYT.git
+        run: |
+          git clone --quiet --depth=1 https://github.com/VasirakCalgux/VolumeBoostYT.git
 
       - name: Build Return-YouTube-Music-Dislikes
         if: ${{ inputs.enable_rymd }}
         run: |
-          cd Return-YouTube-Music-Dislikes && make package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootless
-          
+          cd Return-YouTube-Music-Dislikes
+          make package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootless
+
       - name: Build YTMABConfig
         if: ${{ inputs.enable_ytmabc }}
         run: |
-          cd YTMABConfig && make package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootless
+          cd YTMABConfig
+          make package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootless
 
       - name: Build YouMusicPiP
         if: ${{ inputs.enable_youmusicpip }}
         run: |
-          cd YouMusicPiP && make package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootless
+          cd YouMusicPiP
+          make package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootless
 
       - name: Build VolumeBoostYT
         if: ${{ inputs.enable_volumeboostyt }}
         run: |
-          cd VolumeBoostYT && make clean package DEBUG=0 FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootless
+          cd VolumeBoostYT
+          make clean package DEBUG=0 FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootless
 
       - name: Build Custom YTMusicUltimate Tweak
         if: ${{ inputs.enable_ytmultcustom }}
         run: |
-          cd main && make clean package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootless SIDELOADING=1
+          cd main
+          make clean package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootless SIDELOADING=1
 
-      - name: Move Files To Output Directory
-        run: mv build/*.deb output/
+      - name: Collect DEB Files
+        shell: bash
+        run: |
+          mkdir -p output
+
+          find . \
+            -type f \
+            -name '*.deb' \
+            -not -path './output/*' \
+            -not -path '*/.git/*' \
+            -exec cp -f {} output/ \;
+
+          if ! find output -maxdepth 1 -type f -name '*.deb' -print -quit | grep -q .; then
+            echo "::error::No Deb file found"
+            exit 1
+          fi
+
+          echo "Deb files:"
+          ls -lh output/*.deb
 
       - name: Create Release
         uses: softprops/action-gh-release@v3
         with:
-          tag_name: DEBS(${{ github.run_number }})
-          name: Built debs 
+          tag_name: DEBS-${{ github.run_number }}
+          name: Built debs
           files: output/*.deb
           draft: true
+          fail_on_unmatched_files: true
 
       - name: Output Release URL
         run: |
