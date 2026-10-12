@@ -1,9 +1,9 @@
-Package: com.ginsu.ytmusicultimate
+Package: com.mark02-2012.ytmusicultimate
 Name: YTMusicUltimate
 Version: 0.0.1
 Architecture: iphoneos-arm
 Description: YouTube Music Premium
-Maintainer: dayanch96 & ginsu
+Maintainer: Mark02-2012
 Author: dayanch96 & ginsu
 Section: Tweaks
 Depends: mobilesubstrate (>= 0.9.5000)
