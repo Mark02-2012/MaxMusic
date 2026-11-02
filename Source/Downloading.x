@@ -573,7 +573,13 @@ static NSString *extractPlaylistIdFromObject(id obj, NSMutableSet *visited, NSUI
     if (!obj || depth > 12) return nil;
 
     if ([obj isKindOfClass:[NSString class]]) {
-        return isValidPlaylistBrowseID(obj) ? obj : nil;
+        NSString *candidate = [(NSString *)obj stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+        if (isValidPlaylistBrowseID(candidate)) return candidate;
+        NSURLComponents *components = [NSURLComponents componentsWithString:candidate];
+        for (NSURLQueryItem *item in components.queryItems) {
+            if ([item.name isEqualToString:@"list"] && isValidPlaylistBrowseID(item.value)) return item.value;
+        }
+        return nil;
     }
 
     NSValue *ptrVal = [NSValue valueWithNonretainedObject:obj];
@@ -922,101 +928,145 @@ static void extractTracksFromJSONObject(id obj, NSMutableArray *tracks) {
     }
 }
 
+static void YTMUWritePlaylistDebugLog(NSString *message) {
+    if (message.length == 0) return;
+    NSURL *documentsURL = [[[NSFileManager defaultManager] URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask] lastObject];
+    NSURL *folderURL = [documentsURL URLByAppendingPathComponent:@"YTMusicUltimate"];
+    [[NSFileManager defaultManager] createDirectoryAtURL:folderURL withIntermediateDirectories:YES attributes:nil error:nil];
+    NSURL *logURL = [folderURL URLByAppendingPathComponent:@"playlist_debug.log"];
+    NSFileHandle *handle = [NSFileHandle fileHandleForWritingAtPath:logURL.path];
+    if (!handle) {
+        [message writeToURL:logURL atomically:YES encoding:NSUTF8StringEncoding error:nil];
+        return;
+    }
+    [handle seekToEndOfFile];
+    [handle writeData:[[message stringByAppendingString:@"\n"] dataUsingEncoding:NSUTF8StringEncoding]];
+    [handle closeFile];
+}
+
 static NSArray<NSDictionary *> *extractPlaylistTracks(UIView *sourceView) {
     NSString *playlistId = extractPlaylistIdFromHierarchy(sourceView);
     NSMutableArray<NSDictionary *> *tracks = [NSMutableArray array];
+    YTMUWritePlaylistDebugLog([NSString stringWithFormat:@"--- Playlist fetch %@ ---", [NSDate date]]);
+    YTMUWritePlaylistDebugLog([NSString stringWithFormat:@"Resolved playlist ID: %@", playlistId ?: @"(nil)"]);
 
-    NSURL *url = [NSURL URLWithString:@"https://music.youtube.com/youtubei/v1/browse"];
-    NSURLSession *session = [NSURLSession sharedSession];
-    NSDictionary *context = @{
-        @"client": @{
+    if (playlistId.length > 0) {
+        NSString *browseId = playlistId;
+        if ([[browseId uppercaseString] hasPrefix:@"PL"]) browseId = [@"VL" stringByAppendingString:browseId];
+
+        NSURL *url = [NSURL URLWithString:@"https://music.youtube.com/youtubei/v1/browse?prettyPrint=false"];
+        NSURLSessionConfiguration *configuration = [NSURLSessionConfiguration ephemeralSessionConfiguration];
+        configuration.timeoutIntervalForRequest = 20.0;
+        configuration.timeoutIntervalForResource = 30.0;
+        NSURLSession *session = [NSURLSession sessionWithConfiguration:configuration];
+
+        NSDictionary *context = @{@"client": @{
             @"clientName": @"WEB_REMIX",
             @"clientVersion": @"1.20231214.00.00",
             @"hl": @"en",
             @"gl": @"US"
-        }
-    };
+        }};
 
-    // API path: retrieve the playlist page and follow continuation tokens for long playlists.
-    if (playlistId.length > 0) {
-        NSString *browseId = playlistId;
-        NSString *upper = [browseId uppercaseString];
-        if ([upper hasPrefix:@"PL"] && ![upper hasPrefix:@"VL"]) {
-            browseId = [NSString stringWithFormat:@"VL%@", browseId];
+        NSString *sapisid = nil;
+        for (NSHTTPCookie *cookie in [[NSHTTPCookieStorage sharedHTTPCookieStorage] cookies]) {
+            if ([cookie.name isEqualToString:@"SAPISID"] && cookie.value.length > 0) {
+                sapisid = cookie.value;
+                break;
+            }
         }
+        NSString *origin = @"https://music.youtube.com";
+        NSString *authHeader = generateSAPISIDHASH(sapisid, origin);
+        YTMUWritePlaylistDebugLog([NSString stringWithFormat:@"SAPISID available: %@", sapisid.length ? @"yes" : @"no"]);
 
         NSString *continuation = nil;
-        NSString *lastContinuation = nil;
+        NSMutableSet *seenContinuations = [NSMutableSet set];
         NSUInteger page = 0;
 
         while (page < 100) {
-            NSMutableDictionary *bodyDict = [NSMutableDictionary dictionaryWithDictionary:@{
-                @"context": context
-            }];
-            if (continuation.length > 0) {
-                bodyDict[@"continuation"] = continuation;
-            } else {
-                bodyDict[@"browseId"] = browseId;
-            }
+            NSMutableDictionary *bodyDict = [@{@"context": context} mutableCopy];
+            if (continuation.length > 0) bodyDict[@"continuation"] = continuation;
+            else bodyDict[@"browseId"] = browseId;
 
             NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
             request.HTTPMethod = @"POST";
+            request.timeoutInterval = 20.0;
             [request setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
-            [request setValue:@"https://music.youtube.com" forHTTPHeaderField:@"Origin"];
-            [request setValue:@"https://music.youtube.com" forHTTPHeaderField:@"Referer"];
+            [request setValue:origin forHTTPHeaderField:@"Origin"];
+            [request setValue:origin forHTTPHeaderField:@"X-Origin"];
+            [request setValue:[origin stringByAppendingString:@"/"] forHTTPHeaderField:@"Referer"];
             [request setValue:@"Mozilla/5.0 (iPhone; CPU iPhone OS 16_5 like Mac OS X) AppleWebKit/605.1.15" forHTTPHeaderField:@"User-Agent"];
-
+            if (authHeader.length > 0) [request setValue:authHeader forHTTPHeaderField:@"Authorization"];
             request.HTTPBody = [NSJSONSerialization dataWithJSONObject:bodyDict options:0 error:nil];
 
             dispatch_semaphore_t sema = dispatch_semaphore_create(0);
             __block NSData *responseData = nil;
             __block NSError *requestError = nil;
-
+            __block NSHTTPURLResponse *httpResponse = nil;
             NSURLSessionDataTask *task = [session dataTaskWithRequest:request completionHandler:^(NSData *data, NSURLResponse *response, NSError *error) {
-                if (data.length > 0) responseData = data;
+                responseData = data;
                 requestError = error;
+                if ([response isKindOfClass:[NSHTTPURLResponse class]]) httpResponse = (NSHTTPURLResponse *)response;
                 dispatch_semaphore_signal(sema);
             }];
             [task resume];
-            dispatch_semaphore_wait(sema, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(20 * NSEC_PER_SEC)));
 
-            if (requestError || responseData.length == 0) break;
+            if (dispatch_semaphore_wait(sema, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(25 * NSEC_PER_SEC))) != 0) {
+                [task cancel];
+                YTMUWritePlaylistDebugLog([NSString stringWithFormat:@"Page %lu timed out", (unsigned long)(page + 1)]);
+                break;
+            }
 
-            NSDictionary *json = [NSJSONSerialization JSONObjectWithData:responseData options:0 error:nil];
-            if (![json isKindOfClass:[NSDictionary class]]) break;
+            NSInteger statusCode = httpResponse.statusCode;
+            if (requestError || responseData.length == 0 || (statusCode != 0 && (statusCode < 200 || statusCode >= 300))) {
+                YTMUWritePlaylistDebugLog([NSString stringWithFormat:@"Page %lu failed: HTTP %ld, error=%@", (unsigned long)(page + 1), (long)statusCode, requestError.localizedDescription ?: @"none"]);
+                break;
+            }
 
+            NSError *jsonError = nil;
+            id jsonObject = [NSJSONSerialization JSONObjectWithData:responseData options:NSJSONReadingMutableContainers error:&jsonError];
+            if (![jsonObject isKindOfClass:[NSDictionary class]]) {
+                YTMUWritePlaylistDebugLog([NSString stringWithFormat:@"Page %lu invalid JSON: %@", (unsigned long)(page + 1), jsonError.localizedDescription ?: @"unknown"]);
+                break;
+            }
+
+            NSDictionary *json = (NSDictionary *)jsonObject;
             NSUInteger before = tracks.count;
             extractTracksFromJSONObject(json, tracks);
+            page++;
+            YTMUWritePlaylistDebugLog([NSString stringWithFormat:@"Page %lu: HTTP %ld, added %lu, total %lu", (unsigned long)page, (long)statusCode, (unsigned long)(tracks.count - before), (unsigned long)tracks.count]);
 
             NSMutableSet *tokenVisited = [NSMutableSet set];
             NSString *nextToken = findContinuationToken(json, tokenVisited, 0);
-
-            page++;
-            if (nextToken.length == 0 || [nextToken isEqualToString:lastContinuation]) break;
-            if (tracks.count == before && page > 1) break;
-
-            lastContinuation = nextToken;
+            if (nextToken.length == 0) {
+                YTMUWritePlaylistDebugLog(@"Pagination finished: no continuation token.");
+                break;
+            }
+            if ([seenContinuations containsObject:nextToken]) {
+                YTMUWritePlaylistDebugLog(@"Pagination stopped: repeated continuation token.");
+                break;
+            }
+            [seenContinuations addObject:nextToken];
             continuation = nextToken;
         }
 
-        if (tracks.count > 0) return tracks;
+        [session invalidateAndCancel];
+        if (tracks.count > 0) {
+            YTMUWritePlaylistDebugLog([NSString stringWithFormat:@"Playlist fetch completed: %lu tracks.", (unsigned long)tracks.count]);
+            return tracks;
+        }
+    } else {
+        YTMUWritePlaylistDebugLog(@"No playlist/browse ID found in tapped view hierarchy.");
     }
 
-    // UI fallback: scan the tapped node and its playlist controller/view.
     NSMutableSet *visited = [NSMutableSet set];
     if (sourceView) scanObjectForTracks(sourceView, tracks, visited);
-
     UIViewController *vc = nil;
-    if (sourceView && [sourceView respondsToSelector:@selector(_viewControllerForAncestor)]) {
-        vc = [sourceView _viewControllerForAncestor];
-    }
-    if (vc && !(gActivePlayerVC && vc == gActivePlayerVC)) {
-        scanObjectForTracks(vc, tracks, visited);
-    }
+    if (sourceView && [sourceView respondsToSelector:@selector(_viewControllerForAncestor)]) vc = [sourceView _viewControllerForAncestor];
+    if (vc && !(gActivePlayerVC && vc == gActivePlayerVC)) scanObjectForTracks(vc, tracks, visited);
 
+    YTMUWritePlaylistDebugLog([NSString stringWithFormat:@"UI fallback completed: %lu tracks.", (unsigned long)tracks.count]);
     return tracks;
 }
-
 %hook ELMTouchCommandPropertiesHandler
 - (void)handleTap {
 
