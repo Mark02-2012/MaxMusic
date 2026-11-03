@@ -27,6 +27,8 @@ static BOOL YTMU(NSString *key) {
 
 static __weak id gActivePlayerResponse = nil;
 static __weak id gActivePlayerVC = nil;
+// Playlist ID from the most recent YTICommand watchEndpoint.
+static NSString *gActivePlaylistId = nil;
 
 %hook YTPlayerViewController
 - (void)setPlayerResponse:(id)response {
@@ -391,6 +393,20 @@ static BOOL isValidPlaylistBrowseID(NSString *value) {
            [upper hasPrefix:@"FL"] || [upper hasPrefix:@"LL"];
 }
 
+static NSString *normalizePlaylistBrowseID(NSString *playlistId) {
+    if (![playlistId isKindOfClass:[NSString class]]) return nil;
+    NSString *clean = [playlistId stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
+    if (clean.length == 0) return nil;
+
+    NSString *upper = clean.uppercaseString;
+    if ([upper hasPrefix:@"VL"] || [upper hasPrefix:@"VM"]) return clean;
+
+    for (NSString *prefix in @[@"PL", @"OL", @"RD", @"UU", @"FL", @"LL"]) {
+        if ([upper hasPrefix:prefix]) return [@"VL" stringByAppendingString:clean];
+    }
+    return clean;
+}
+
 static NSString *extractPlaylistIdFromObject(id obj, NSMutableSet *visited, NSUInteger depth) {
     if (!obj || depth > 12) return nil;
 
@@ -543,6 +559,32 @@ static NSString *extractPlaylistIdFromObject(id obj, NSMutableSet *visited, NSUI
     return nil;
 }
 
+// YTICommand carries the original YTIWatchEndpoint used to start a track.
+// Its playlistId is the authoritative playlist context; PlayerResponse alone
+// generally only contains video metadata and cannot identify the playlist.
+%hook YTICommand
+- (void)setWatchEndpoint:(id)watchEndpoint {
+    %orig;
+
+    NSString *playlistId = nil;
+    if (watchEndpoint) {
+        if ([watchEndpoint respondsToSelector:NSSelectorFromString(@"playlistId")]) {
+            id value = callObjectSelector(watchEndpoint, NSSelectorFromString(@"playlistId"));
+            if ([value isKindOfClass:[NSString class]]) playlistId = value;
+        }
+
+        if (!isValidPlaylistBrowseID(playlistId)) {
+            NSMutableSet *commandVisited = [NSMutableSet set];
+            playlistId = extractPlaylistIdFromObject(watchEndpoint, commandVisited, 0);
+        }
+    }
+
+    gActivePlaylistId = isValidPlaylistBrowseID(playlistId) ? [playlistId copy] : nil;
+    NSLog(@"[MaxMusic Playlist] WatchEndpoint updated; playlistID=%@",
+          gActivePlaylistId ?: @"(none)");
+}
+%end
+
 static NSString *findContinuationToken(id obj, NSMutableSet *visited, NSUInteger depth) {
     if (!obj || depth > 16) return nil;
 
@@ -601,6 +643,12 @@ static NSString *extractPlaylistIdFromHierarchy(UIView *sourceView) {
         NSMutableSet *controllerVisited = [NSMutableSet set];
         playlistId = extractPlaylistIdFromObject(vc, controllerVisited, 0);
         if (playlistId) return playlistId;
+    }
+
+    // The watch command is the reliable link between a track and the playlist
+    // it was launched from. This also survives opening a download action sheet.
+    if (isValidPlaylistBrowseID(gActivePlaylistId)) {
+        return gActivePlaylistId;
     }
 
     // When the action originates from Now Playing, the playlist endpoint can
@@ -720,10 +768,36 @@ static void extractTracksFromJSONObject(id obj, NSMutableArray *tracks) {
                         @"title": title ?: @"Track"
                     }];
                 }
+            } else {
+                // Newer renderer variants can place the watch endpoint deeper
+                // than playlistItemData/overlay. Search only this row's subtree.
+                for (id nestedValue in renderer.allValues) {
+                    extractTracksFromJSONObject(nestedValue, tracks);
+                }
             }
             return;
         }
-        
+
+        // Classic YouTube playlist renderer (also returned by some mixed pages).
+        NSDictionary *playlistVideoRenderer = dict[@"playlistVideoRenderer"];
+        if ([playlistVideoRenderer isKindOfClass:[NSDictionary class]]) {
+            NSString *videoId = playlistVideoRenderer[@"videoId"];
+            NSDictionary *titleObject = playlistVideoRenderer[@"title"];
+            NSString *title = titleObject[@"simpleText"];
+            if (![title isKindOfClass:[NSString class]]) {
+                NSArray *runs = titleObject[@"runs"];
+                if ([runs isKindOfClass:[NSArray class]] && runs.count > 0) title = runs.firstObject[@"text"];
+            }
+            if ([videoId isKindOfClass:[NSString class]] && videoId.length > 0) {
+                BOOL exists = NO;
+                for (NSDictionary *d in tracks) {
+                    if ([d[@"videoId"] isEqualToString:videoId]) { exists = YES; break; }
+                }
+                if (!exists) [tracks addObject:@{@"videoId": videoId, @"title": title ?: @"Track"}];
+            }
+            return;
+        }
+
         // Check for playlistPanelVideoRenderer (another format)
         NSDictionary *panelRenderer = dict[@"playlistPanelVideoRenderer"];
         if ([panelRenderer isKindOfClass:[NSDictionary class]]) {
@@ -794,8 +868,12 @@ static NSArray<NSDictionary *> *extractPlaylistTracks(NSString *playlistId) {
         return tracks;
     }
 
-    NSString *browseId = playlistId;
-    if ([[browseId uppercaseString] hasPrefix:@"PL"]) browseId = [@"VL" stringByAppendingString:browseId];
+    NSString *browseId = normalizePlaylistBrowseID(playlistId);
+    if (browseId.length == 0) {
+        YTMUWritePlaylistDebugLog(@"Playlist fetch aborted: browseId normalization returned an empty value.");
+        return tracks;
+    }
+    YTMUWritePlaylistDebugLog([NSString stringWithFormat:@"Normalized browseId: %@", browseId]);
 
     NSURL *url = [NSURL URLWithString:@"https://music.youtube.com/youtubei/v1/browse?prettyPrint=false"];
     NSURLSessionConfiguration *configuration = [NSURLSessionConfiguration ephemeralSessionConfiguration];
@@ -843,6 +921,9 @@ static NSArray<NSDictionary *> *extractPlaylistTracks(NSString *playlistId) {
         request.HTTPMethod = @"POST";
         request.timeoutInterval = 20.0;
         [request setValue:@"application/json" forHTTPHeaderField:@"Content-Type"];
+        [request setValue:@"application/json" forHTTPHeaderField:@"Accept"];
+        [request setValue:@"67" forHTTPHeaderField:@"X-Youtube-Client-Name"];
+        [request setValue:@"1.20260327.10.00" forHTTPHeaderField:@"X-Youtube-Client-Version"];
         [request setValue:origin forHTTPHeaderField:@"Origin"];
         [request setValue:origin forHTTPHeaderField:@"X-Origin"];
         [request setValue:[origin stringByAppendingString:@"/"] forHTTPHeaderField:@"Referer"];
@@ -874,9 +955,11 @@ static NSArray<NSDictionary *> *extractPlaylistTracks(NSString *playlistId) {
 
         NSInteger statusCode = httpResponse.statusCode;
         if (requestError || responseData.length == 0 || (statusCode != 0 && (statusCode < 200 || statusCode >= 300))) {
-            YTMUWritePlaylistDebugLog([NSString stringWithFormat:@"Page %lu failed: HTTP %ld, error=%@",
+            NSString *bodyPreview = responseData.length ? [[NSString alloc] initWithData:responseData encoding:NSUTF8StringEncoding] : @"(empty body)";
+            if (bodyPreview.length > 1800) bodyPreview = [[bodyPreview substringToIndex:1800] stringByAppendingString:@"…"];
+            YTMUWritePlaylistDebugLog([NSString stringWithFormat:@"Page %lu failed: HTTP %ld, error=%@, body=%@",
                                       (unsigned long)(page + 1), (long)statusCode,
-                                      requestError.localizedDescription ?: @"none"]);
+                                      requestError.localizedDescription ?: @"none", bodyPreview ?: @"(non-UTF8 body)"]);
             break;
         }
 
@@ -895,6 +978,13 @@ static NSArray<NSDictionary *> *extractPlaylistTracks(NSString *playlistId) {
         YTMUWritePlaylistDebugLog([NSString stringWithFormat:@"Page %lu: HTTP %ld, added %lu, total %lu",
                                   (unsigned long)page, (long)statusCode,
                                   (unsigned long)(tracks.count - before), (unsigned long)tracks.count]);
+        if (tracks.count == before) {
+            NSArray *rootKeys = [[json allKeys] sortedArrayUsingSelector:@selector(compare:)];
+            NSString *bodyPreview = [[NSString alloc] initWithData:responseData encoding:NSUTF8StringEncoding];
+            if (bodyPreview.length > 2600) bodyPreview = [[bodyPreview substringToIndex:2600] stringByAppendingString:@"…"];
+            YTMUWritePlaylistDebugLog([NSString stringWithFormat:@"No tracks parsed on page %lu. Root keys=%@. JSON preview=%@",
+                                      (unsigned long)page, rootKeys ?: @[], bodyPreview ?: @"(non-UTF8 body)"]);
+        }
 
         NSMutableSet *tokenVisited = [NSMutableSet set];
         NSString *nextToken = findContinuationToken(json, tokenVisited, 0);
@@ -928,6 +1018,15 @@ static NSArray<NSDictionary *> *extractPlaylistTracks(NSString *playlistId) {
     ELMNodeController *node = [self valueForKey:@"_controller"];
     UIGestureRecognizer *tapRecognizer = [self valueForKey:@"_tapRecognizer"];
 
+    NSString *nodePlaylistId = nil;
+    if (node) {
+        NSMutableSet *nodeVisited = [NSMutableSet set];
+        nodePlaylistId = extractPlaylistIdFromObject(node, nodeVisited, 0);
+        if (isValidPlaylistBrowseID(nodePlaylistId)) {
+            gActivePlaylistId = [nodePlaylistId copy];
+        }
+    }
+
     BOOL isDownloadNode = NO;
     if (node && node.key) {
         NSString *k = [node.key lowercaseString];
@@ -954,8 +1053,8 @@ static NSArray<NSDictionary *> *extractPlaylistTracks(NSString *playlistId) {
         presentingVC = [UIApplication sharedApplication].keyWindow.rootViewController;
     }
 
-    BOOL isPlaylistDownload = NO;
-    if (node && node.key) {
+    BOOL isPlaylistDownload = isValidPlaylistBrowseID(nodePlaylistId);
+    if (!isPlaylistDownload && node && node.key) {
         NSString *k = [node.key lowercaseString];
         if ([k containsString:@"playlist"] || [k containsString:@"header"] || [k containsString:@"browse"] || [k containsString:@"shelf"]) {
             isPlaylistDownload = YES;
@@ -969,6 +1068,8 @@ static NSArray<NSDictionary *> *extractPlaylistTracks(NSString *playlistId) {
     }
     
     if (isPlaylistDownload) {
+        NSLog(@"[MaxMusic Playlist] Direct playlist download tap: node=%@ key=%@ playlistID=%@",
+              NSStringFromClass([node class]), node.key ?: @"(nil)", nodePlaylistId ?: @"(nil)");
         [self downloadPlaylistTracks:(id)tapView];
         return;
     }
@@ -1080,6 +1181,9 @@ static NSArray<NSDictionary *> *extractPlaylistTracks(NSString *playlistId) {
 
     // Read UIKit/player state on the main thread before starting network work.
     NSString *playlistId = extractPlaylistIdFromHierarchy(sourceView);
+    if (!isValidPlaylistBrowseID(playlistId) && isValidPlaylistBrowseID(gActivePlaylistId)) {
+        playlistId = gActivePlaylistId;
+    }
     NSString *playlistName = saveAsCustomOfflinePlaylist ? getPlaylistTitleFromHierarchy(sourceView) : nil;
     if (saveAsCustomOfflinePlaylist && playlistName.length == 0) {
         playlistName = @"Downloaded Playlist";
