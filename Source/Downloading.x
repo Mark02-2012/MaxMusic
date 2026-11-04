@@ -407,8 +407,39 @@ static NSString *normalizePlaylistBrowseID(NSString *playlistId) {
     return clean;
 }
 
+static NSString *extractPlaylistIdFromPoomSmartController(id obj) {
+    if (!obj) return nil;
+
+    NSString *className = NSStringFromClass([obj class]);
+    BOOL isSectionController =
+        [className containsString:@"YTPlaylistVideoListSectionController"] ||
+        [className containsString:@"YTPlaylistPanelSectionController"];
+    BOOL isPlaylistRenderer =
+        [className containsString:@"YTIPlaylistVideoListRenderer"] ||
+        [className containsString:@"YTIPlaylistPanelRenderer"];
+
+    id renderer = obj;
+    if (isSectionController) {
+        renderer = callObjectSelector(obj, NSSelectorFromString(@"renderer"));
+    } else if (!isPlaylistRenderer) {
+        return nil;
+    }
+
+    if (!renderer) return nil;
+
+    id value = callObjectSelector(renderer, NSSelectorFromString(@"playlistId"));
+    if ([value isKindOfClass:[NSString class]] && isValidPlaylistBrowseID(value)) {
+        NSLog(@"[MaxMusic Playlist] PoomSmart renderer extraction: %@ -> %@", className, value);
+        return value;
+    }
+    return nil;
+}
+
 static NSString *extractPlaylistIdFromObject(id obj, NSMutableSet *visited, NSUInteger depth) {
     if (!obj || depth > 12) return nil;
+
+    NSString *poomSmartPlaylistId = extractPlaylistIdFromPoomSmartController(obj);
+    if (poomSmartPlaylistId) return poomSmartPlaylistId;
 
     if ([obj isKindOfClass:[NSString class]]) {
         NSString *candidate = [(NSString *)obj stringByTrimmingCharactersInSet:[NSCharacterSet whitespaceAndNewlineCharacterSet]];
@@ -506,7 +537,8 @@ static NSString *extractPlaylistIdFromObject(id obj, NSMutableSet *visited, NSUI
         @"playlistId", @"playlistID", @"listId", @"browseId", @"browseID", @"browseEndpoint", @"navigationEndpoint",
         @"endpoint", @"command", @"serviceEndpoint", @"watchEndpoint",
         @"node", @"data", @"model", @"content", @"renderer", @"playlist",
-        @"response", @"browseResponse", @"sectionListRenderer", @"tabs", @"tabRenderer"
+        @"response", @"browseResponse", @"sectionListRenderer", @"tabs", @"tabRenderer",
+        @"parentResponder", @"sectionController"
     ]) {
         SEL sel = NSSelectorFromString(selName);
         if (![obj respondsToSelector:sel]) continue;
