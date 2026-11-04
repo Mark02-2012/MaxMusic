@@ -346,7 +346,9 @@ static NSString *extractAudioURLFromPlayerResponse(NSDictionary *json) {
 - (void)downloadTrackWithVideoId:(NSString *)videoId title:(NSString *)suggestedTitle playlistName:(NSString *)playlistName completion:(void (^)(BOOL, NSString *))completion;
 - (void)downloadCoverImage:(id)sourceView;
 - (void)downloadPlaylistTracks:(id)sourceView;
+- (void)downloadPlaylistTracks:(id)sourceView context:(id)context;
 - (void)downloadPlaylistTracks:(id)sourceView saveAsCustomOfflinePlaylist:(BOOL)saveAsCustomOfflinePlaylist;
+- (void)downloadPlaylistTracks:(id)sourceView context:(id)context saveAsCustomOfflinePlaylist:(BOOL)saveAsCustomOfflinePlaylist;
 - (NSString *)getURLFromManifest:(NSURL *)manifest;
 @end
 
@@ -627,10 +629,99 @@ static NSString *findContinuationToken(id obj, NSMutableSet *visited, NSUInteger
     return nil;
 }
 
-static NSString *extractPlaylistIdFromHierarchy(UIView *sourceView) {
+static NSString *extractPlaylistIdFromTextDescription(NSString *description) {
+    if (![description isKindOfClass:[NSString class]] || description.length == 0) return nil;
+
+    NSArray<NSString *> *markers = @[@"&list=", @"?list=", @"/playlist?list="];
+    for (NSString *marker in markers) {
+        NSRange markerRange = [description rangeOfString:marker options:NSCaseInsensitiveSearch];
+        if (markerRange.location == NSNotFound) continue;
+
+        NSUInteger start = NSMaxRange(markerRange);
+        NSUInteger end = start;
+        NSCharacterSet *terminators = [NSCharacterSet characterSetWithCharactersInString:@"\\\"'& <>),]\n\r"];
+        while (end < description.length && ![terminators characterIsMember:[description characterAtIndex:end]]) {
+            end++;
+        }
+        if (end <= start) continue;
+
+        NSString *candidate = [description substringWithRange:NSMakeRange(start, end - start)];
+        if ([candidate hasSuffix:@"Z"] && candidate.length > 2) {
+            candidate = [candidate substringToIndex:candidate.length - 1];
+        }
+        if (isValidPlaylistBrowseID(candidate)) return candidate;
+    }
+    return nil;
+}
+
+// Follow the same ELM context path used by PoomSmart: handler._context ->
+// parentResponder -> elementEntry / playlist cell controller -> section renderer.
+static NSString *extractPlaylistIdFromELMContext(id context) {
+    if (!context) return nil;
+
+    NSMutableSet *visited = [NSMutableSet set];
+    id current = callObjectSelector(context, NSSelectorFromString(@"parentResponder"));
+
+    for (NSUInteger depth = 0; current && depth < 10; depth++) {
+        NSValue *pointer = [NSValue valueWithNonretainedObject:current];
+        if ([visited containsObject:pointer]) break;
+        [visited addObject:pointer];
+
+        NSString *className = NSStringFromClass([current class]);
+        BOOL isPlaylistCell =
+            [className containsString:@"YTPlaylistVideoCellController"] ||
+            [className containsString:@"YTPlaylistPanelProminentThumbnailVideoCellController"];
+
+        if (isPlaylistCell) {
+            id sectionController = callObjectSelector(current, NSSelectorFromString(@"parentResponder"));
+            id renderer = callObjectSelector(sectionController, NSSelectorFromString(@"renderer"));
+            id playlistValue = callObjectSelector(renderer, NSSelectorFromString(@"playlistId"));
+            if ([playlistValue isKindOfClass:[NSString class]] && isValidPlaylistBrowseID(playlistValue)) {
+                YTMUWritePlaylistDebugLog([NSString stringWithFormat:@"ELM playlist cell path: %@ -> %@", className, playlistValue]);
+                return playlistValue;
+            }
+        }
+
+        id entry = callObjectSelector(current, NSSelectorFromString(@"elementEntry"));
+        if (entry) {
+            NSString *fromDescription = extractPlaylistIdFromTextDescription([entry description]);
+            if (fromDescription) {
+                YTMUWritePlaylistDebugLog([NSString stringWithFormat:@"ELM elementEntry description resolved playlist: %@", fromDescription]);
+                return fromDescription;
+            }
+
+            NSString *fromEntry = extractPlaylistIdFromObject(entry, [NSMutableSet set], 0);
+            if (fromEntry) return fromEntry;
+        }
+
+        NSString *fromCurrent = extractPlaylistIdFromPoomSmartObject(current);
+        if (fromCurrent) return fromCurrent;
+
+        id next = callObjectSelector(current, NSSelectorFromString(@"parentResponder"));
+        if (!next || next == current) break;
+        current = next;
+    }
+
+    // The ELM element entry itself can carry a watch/playlist endpoint.
+    id directEntry = callObjectSelector(context, NSSelectorFromString(@"elementEntry"));
+    if (directEntry) {
+        NSString *fromDescription = extractPlaylistIdFromTextDescription([directEntry description]);
+        if (fromDescription) return fromDescription;
+        NSString *fromEntry = extractPlaylistIdFromObject(directEntry, [NSMutableSet set], 0);
+        if (fromEntry) return fromEntry;
+    }
+
+    return nil;
+}
+
+static NSString *extractPlaylistIdFromHierarchy(UIView *sourceView, id elmContext) {
+    // The ELM context is the most precise source: it belongs to the tapped node.
+    NSString *playlistId = extractPlaylistIdFromELMContext(elmContext);
+    if (playlistId) return playlistId;
+
     // First inspect the tapped control and its actual controller hierarchy.
     NSMutableSet *viewVisited = [NSMutableSet set];
-    NSString *playlistId = extractPlaylistIdFromObject(sourceView, viewVisited, 0);
+    playlistId = extractPlaylistIdFromObject(sourceView, viewVisited, 0);
     if (playlistId) return playlistId;
 
     UIViewController *vc = nil;
@@ -968,6 +1059,14 @@ static NSArray<NSDictionary *> *extractPlaylistTracks(NSString *playlistId) {
 
     ELMNodeController *node = [self valueForKey:@"_controller"];
     UIGestureRecognizer *tapRecognizer = [self valueForKey:@"_tapRecognizer"];
+    id playlistELMContext = nil;
+    Ivar contextIvar = class_getInstanceVariable([self class], "_context");
+    if (contextIvar) {
+        playlistELMContext = object_getIvar(self, contextIvar);
+    }
+    if (!playlistELMContext) {
+        playlistELMContext = callObjectSelector(self, NSSelectorFromString(@"context"));
+    }
 
     BOOL isDownloadNode = NO;
     if (node && node.key) {
@@ -1010,7 +1109,7 @@ static NSArray<NSDictionary *> *extractPlaylistTracks(NSString *playlistId) {
     }
     
     if (isPlaylistDownload) {
-        [self downloadPlaylistTracks:(id)tapView];
+        [self downloadPlaylistTracks:(id)tapView context:playlistELMContext];
         return;
     }
 
@@ -1022,7 +1121,7 @@ static NSArray<NSDictionary *> *extractPlaylistTracks(NSString *playlistId) {
         [sheetController addHeaderWithTitle:LOC(@"SELECT_ACTION") subtitle:nil];
 
         [sheetController addAction:[%c(YTActionSheetAction) actionWithTitle:@"Download All Playlist Tracks" iconImage:[%c(YTUIResources) downloadOutline] style:0 handler:^ {
-            [self downloadPlaylistTracks:(id)tapView];
+            [self downloadPlaylistTracks:(id)tapView context:playlistELMContext];
         }]];
 
         [sheetController addAction:[%c(YTActionSheetAction) actionWithTitle:LOC(@"DOWNLOAD_AUDIO") iconImage:[%c(YTUIResources) audioOutline] style:0 handler:^ {
@@ -1054,9 +1153,14 @@ static NSArray<NSDictionary *> *extractPlaylistTracks(NSString *playlistId) {
 
 %new
 - (void)downloadPlaylistTracks:(UIView *)sourceView {
+    [self downloadPlaylistTracks:sourceView context:nil];
+}
+
+%new
+- (void)downloadPlaylistTracks:(UIView *)sourceView context:(id)context {
     if (![NSThread isMainThread]) {
         dispatch_async(dispatch_get_main_queue(), ^{
-            [self downloadPlaylistTracks:sourceView];
+            [self downloadPlaylistTracks:sourceView context:context];
         });
         return;
     }
@@ -1087,13 +1191,13 @@ static NSArray<NSDictionary *> *extractPlaylistTracks(NSString *playlistId) {
     [choiceController addAction:[UIAlertAction actionWithTitle:@"Separate Songs"
                                                           style:UIAlertActionStyleDefault
                                                         handler:^(__unused UIAlertAction *action) {
-        [self downloadPlaylistTracks:sourceView saveAsCustomOfflinePlaylist:NO];
+        [self downloadPlaylistTracks:sourceView context:context saveAsCustomOfflinePlaylist:NO];
     }]];
 
     [choiceController addAction:[UIAlertAction actionWithTitle:@"Custom Offline Playlist"
                                                           style:UIAlertActionStyleDefault
                                                         handler:^(__unused UIAlertAction *action) {
-        [self downloadPlaylistTracks:sourceView saveAsCustomOfflinePlaylist:YES];
+        [self downloadPlaylistTracks:sourceView context:context saveAsCustomOfflinePlaylist:YES];
     }]];
 
     [choiceController addAction:[UIAlertAction actionWithTitle:@"Cancel"
@@ -1112,21 +1216,27 @@ static NSArray<NSDictionary *> *extractPlaylistTracks(NSString *playlistId) {
 
 %new
 - (void)downloadPlaylistTracks:(UIView *)sourceView saveAsCustomOfflinePlaylist:(BOOL)saveAsCustomOfflinePlaylist {
+    [self downloadPlaylistTracks:sourceView context:nil saveAsCustomOfflinePlaylist:saveAsCustomOfflinePlaylist];
+}
+
+%new
+- (void)downloadPlaylistTracks:(UIView *)sourceView context:(id)context saveAsCustomOfflinePlaylist:(BOOL)saveAsCustomOfflinePlaylist {
     if (![NSThread isMainThread]) {
         dispatch_async(dispatch_get_main_queue(), ^{
-            [self downloadPlaylistTracks:sourceView saveAsCustomOfflinePlaylist:saveAsCustomOfflinePlaylist];
+            [self downloadPlaylistTracks:sourceView context:context saveAsCustomOfflinePlaylist:saveAsCustomOfflinePlaylist];
         });
         return;
     }
 
     // Read UIKit/player state on the main thread before starting network work.
-    NSString *playlistId = extractPlaylistIdFromHierarchy(sourceView);
+    NSString *playlistId = extractPlaylistIdFromHierarchy(sourceView, context);
     NSString *playlistName = saveAsCustomOfflinePlaylist ? getPlaylistTitleFromHierarchy(sourceView) : nil;
     if (saveAsCustomOfflinePlaylist && playlistName.length == 0) {
         playlistName = @"Downloaded Playlist";
     }
 
     YTMUWritePlaylistDebugLog([NSString stringWithFormat:@"Download mode: %@", saveAsCustomOfflinePlaylist ? @"custom offline playlist" : @"separate songs"]);
+    YTMUWritePlaylistDebugLog([NSString stringWithFormat:@"Playlist ELM context class: %@", context ? NSStringFromClass([context class]) : @"(nil)"]);
     YTMUWritePlaylistDebugLog([NSString stringWithFormat:@"Playlist ID resolved on main thread: %@", playlistId ?: @"(nil)"]);
 
     if (!isValidPlaylistBrowseID(playlistId)) {
