@@ -586,49 +586,6 @@ static NSString *extractPlaylistIdFromObject(id obj, NSMutableSet *visited, NSUI
     return nil;
 }
 
-static NSString *findContinuationToken(id obj, NSMutableSet *visited, NSUInteger depth) {
-    if (!obj || depth > 16) return nil;
-
-    NSValue *ptrVal = [NSValue valueWithNonretainedObject:obj];
-    if ([visited containsObject:ptrVal]) return nil;
-    [visited addObject:ptrVal];
-    if (visited.count > 5000) return nil;
-
-    if ([obj isKindOfClass:[NSDictionary class]]) {
-        NSDictionary *dict = (NSDictionary *)obj;
-
-        NSDictionary *continuationCommand = dict[@"continuationCommand"];
-        if ([continuationCommand isKindOfClass:[NSDictionary class]]) {
-            NSString *token = continuationCommand[@"token"];
-            if ([token isKindOfClass:[NSString class]] && token.length > 0) return token;
-        }
-
-        id continuationEndpoint = dict[@"continuationEndpoint"];
-        if (continuationEndpoint) {
-            NSString *token = findContinuationToken(continuationEndpoint, visited, depth + 1);
-            if (token) return token;
-        }
-
-        NSDictionary *nextContinuationData = dict[@"nextContinuationData"];
-        if ([nextContinuationData isKindOfClass:[NSDictionary class]]) {
-            NSString *token = nextContinuationData[@"continuation"];
-            if ([token isKindOfClass:[NSString class]] && token.length > 0) return token;
-        }
-
-        for (id value in dict.allValues) {
-            NSString *token = findContinuationToken(value, visited, depth + 1);
-            if (token) return token;
-        }
-    } else if ([obj isKindOfClass:[NSArray class]]) {
-        for (id item in (NSArray *)obj) {
-            NSString *token = findContinuationToken(item, visited, depth + 1);
-            if (token) return token;
-        }
-    }
-
-    return nil;
-}
-
 static NSString *extractPlaylistIdFromTextDescription(NSString *description) {
     if (![description isKindOfClass:[NSString class]] || description.length == 0) return nil;
 
@@ -755,151 +712,6 @@ static NSString *extractPlaylistIdFromHierarchy(UIView *sourceView, id elmContex
     return nil;
 }
 
-static void extractTracksFromJSONObject(id obj, NSMutableArray *tracks);
-
-static void extractTracksFromJSONObject(id obj, NSMutableArray *tracks) {
-    if (!obj) return;
-    
-    if ([obj isKindOfClass:[NSDictionary class]]) {
-        NSDictionary *dict = (NSDictionary *)obj;
-        
-        // Check for musicResponsiveListItemRenderer which contains playlist tracks
-        NSDictionary *renderer = dict[@"musicResponsiveListItemRenderer"];
-        if ([renderer isKindOfClass:[NSDictionary class]]) {
-            NSString *videoId = nil;
-            NSString *title = nil;
-            
-            // Extract videoId from playlistItemData
-            NSDictionary *playlistItemData = renderer[@"playlistItemData"];
-            if ([playlistItemData isKindOfClass:[NSDictionary class]]) {
-                NSString *vid = playlistItemData[@"videoId"];
-                if ([vid isKindOfClass:[NSString class]] && vid.length > 0) {
-                    videoId = vid;
-                }
-            }
-            
-            // A playlist renderer may expose its track through navigationEndpoint.
-            if (!videoId) {
-                NSDictionary *navigationEndpoint = renderer[@"navigationEndpoint"];
-                NSDictionary *watchEndpoint = navigationEndpoint[@"watchEndpoint"];
-                NSString *endpointVideoId = watchEndpoint[@"videoId"];
-                if ([endpointVideoId isKindOfClass:[NSString class]] && endpointVideoId.length > 0) {
-                    videoId = endpointVideoId;
-                }
-            }
-
-            // Extract videoId from overlay -> musicItemThumbnailOverlayRenderer -> content -> musicPlayButtonRenderer -> playNavigationEndpoint -> watchEndpoint
-            if (!videoId) {
-                NSDictionary *overlay = renderer[@"overlay"];
-                if ([overlay isKindOfClass:[NSDictionary class]]) {
-                    NSDictionary *thumbOverlay = overlay[@"musicItemThumbnailOverlayRenderer"];
-                    if ([thumbOverlay isKindOfClass:[NSDictionary class]]) {
-                        NSDictionary *content = thumbOverlay[@"content"];
-                        if ([content isKindOfClass:[NSDictionary class]]) {
-                            NSDictionary *playBtn = content[@"musicPlayButtonRenderer"];
-                            if ([playBtn isKindOfClass:[NSDictionary class]]) {
-                                NSDictionary *playNav = playBtn[@"playNavigationEndpoint"];
-                                if ([playNav isKindOfClass:[NSDictionary class]]) {
-                                    NSDictionary *watchEp = playNav[@"watchEndpoint"];
-                                    if ([watchEp isKindOfClass:[NSDictionary class]]) {
-                                        NSString *vid = watchEp[@"videoId"];
-                                        if ([vid isKindOfClass:[NSString class]] && vid.length > 0) {
-                                            videoId = vid;
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            
-            // Extract title from flexColumns[0]
-            NSArray *flexColumns = renderer[@"flexColumns"];
-            if ([flexColumns isKindOfClass:[NSArray class]] && flexColumns.count > 0) {
-                NSDictionary *firstCol = flexColumns[0];
-                if ([firstCol isKindOfClass:[NSDictionary class]]) {
-                    NSDictionary *flexColRenderer = firstCol[@"musicResponsiveListItemFlexColumnRenderer"];
-                    if ([flexColRenderer isKindOfClass:[NSDictionary class]]) {
-                        NSDictionary *text = flexColRenderer[@"text"];
-                        if ([text isKindOfClass:[NSDictionary class]]) {
-                            NSArray *runs = text[@"runs"];
-                            if ([runs isKindOfClass:[NSArray class]] && runs.count > 0) {
-                                NSDictionary *firstRun = runs[0];
-                                if ([firstRun isKindOfClass:[NSDictionary class]]) {
-                                    NSString *txt = firstRun[@"text"];
-                                    if ([txt isKindOfClass:[NSString class]] && txt.length > 0) {
-                                        title = txt;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-            
-            if (videoId) {
-                BOOL exists = NO;
-                for (NSDictionary *d in tracks) {
-                    if ([d[@"videoId"] isEqualToString:videoId]) {
-                        exists = YES;
-                        break;
-                    }
-                }
-                if (!exists) {
-                    [tracks addObject:@{
-                        @"videoId": videoId,
-                        @"title": title ?: @"Track"
-                    }];
-                }
-            }
-            return;
-        }
-        
-        // Check for playlistPanelVideoRenderer (another format)
-        NSDictionary *panelRenderer = dict[@"playlistPanelVideoRenderer"];
-        if ([panelRenderer isKindOfClass:[NSDictionary class]]) {
-            NSString *videoId = panelRenderer[@"videoId"];
-            NSString *title = nil;
-            NSDictionary *titleObj = panelRenderer[@"title"];
-            if ([titleObj isKindOfClass:[NSDictionary class]]) {
-                NSArray *runs = titleObj[@"runs"];
-                if ([runs isKindOfClass:[NSArray class]] && runs.count > 0) {
-                    title = runs[0][@"text"];
-                }
-                if (!title) {
-                    title = titleObj[@"simpleText"];
-                }
-            }
-            if ([videoId isKindOfClass:[NSString class]] && videoId.length > 0) {
-                BOOL exists = NO;
-                for (NSDictionary *d in tracks) {
-                    if ([d[@"videoId"] isEqualToString:videoId]) {
-                        exists = YES;
-                        break;
-                    }
-                }
-                if (!exists) {
-                    [tracks addObject:@{
-                        @"videoId": videoId,
-                        @"title": title ?: @"Track"
-                    }];
-                }
-            }
-            return;
-        }
-        
-        // Recurse into all values
-        for (id val in dict.allValues) {
-            extractTracksFromJSONObject(val, tracks);
-        }
-    } else if ([obj isKindOfClass:[NSArray class]]) {
-        for (id item in (NSArray *)obj) {
-            extractTracksFromJSONObject(item, tracks);
-        }
-    }
-}
-
 static void YTMUWritePlaylistDebugLog(NSString *message) {
     if (message.length == 0) return;
     NSURL *documentsURL = [[[NSFileManager defaultManager] URLsForDirectory:NSDocumentDirectory inDomains:NSUserDomainMask] lastObject];
@@ -916,8 +728,183 @@ static void YTMUWritePlaylistDebugLog(NSString *message) {
     [handle closeFile];
 }
 
+static void collectPlaylistShelfContents(id obj, NSMutableArray<NSArray *> *shelves, NSUInteger depth) {
+    if (!obj || depth > 24) return;
+
+    if ([obj isKindOfClass:[NSDictionary class]]) {
+        NSDictionary *dict = (NSDictionary *)obj;
+        NSDictionary *playlistShelf = dict[@"musicPlaylistShelfRenderer"];
+        if ([playlistShelf isKindOfClass:[NSDictionary class]]) {
+            NSArray *contents = playlistShelf[@"contents"];
+            if ([contents isKindOfClass:[NSArray class]]) [shelves addObject:contents];
+            // Do not recurse into the playlist shelf's contents here: they are
+            // collected as one authoritative list and parsed separately.
+            for (id key in dict) {
+                if (![key isEqual:@"musicPlaylistShelfRenderer"])
+                    collectPlaylistShelfContents(dict[key], shelves, depth + 1);
+            }
+            return;
+        }
+        for (id value in dict.allValues)
+            collectPlaylistShelfContents(value, shelves, depth + 1);
+    } else if ([obj isKindOfClass:[NSArray class]]) {
+        for (id item in (NSArray *)obj)
+            collectPlaylistShelfContents(item, shelves, depth + 1);
+    }
+}
+
+static void collectContinuationItems(id obj, NSMutableArray *items, NSUInteger depth) {
+    if (!obj || depth > 20) return;
+
+    if ([obj isKindOfClass:[NSDictionary class]]) {
+        NSDictionary *dict = (NSDictionary *)obj;
+
+        // Current music playlist continuation payload.
+        NSDictionary *playlistShelf = dict[@"musicPlaylistShelfContinuation"];
+        if ([playlistShelf isKindOfClass:[NSDictionary class]]) {
+            NSArray *continuationItems = playlistShelf[@"contents"];
+            if ([continuationItems isKindOfClass:[NSArray class]]) [items addObjectsFromArray:continuationItems];
+        }
+
+        // Older/alternate playlist continuation payload.
+        NSDictionary *musicShelf = dict[@"musicShelfContinuation"];
+        if ([musicShelf isKindOfClass:[NSDictionary class]]) {
+            NSArray *continuationItems = musicShelf[@"contents"];
+            if ([continuationItems isKindOfClass:[NSArray class]]) [items addObjectsFromArray:continuationItems];
+        }
+
+        NSDictionary *appendAction = dict[@"appendContinuationItemsAction"];
+        if ([appendAction isKindOfClass:[NSDictionary class]]) {
+            NSArray *continuationItems = appendAction[@"continuationItems"];
+            if ([continuationItems isKindOfClass:[NSArray class]]) [items addObjectsFromArray:continuationItems];
+        }
+
+        NSDictionary *reloadCommand = dict[@"reloadContinuationItemsCommand"];
+        if ([reloadCommand isKindOfClass:[NSDictionary class]]) {
+            NSArray *continuationItems = reloadCommand[@"continuationItems"];
+            if ([continuationItems isKindOfClass:[NSArray class]]) [items addObjectsFromArray:continuationItems];
+        }
+
+        for (id value in dict.allValues)
+            collectContinuationItems(value, items, depth + 1);
+    } else if ([obj isKindOfClass:[NSArray class]]) {
+        for (id item in (NSArray *)obj)
+            collectContinuationItems(item, items, depth + 1);
+    }
+}
+
+static NSString *findPlaylistContinuationToken(id obj, NSUInteger depth) {
+    if (!obj || depth > 24) return nil;
+
+    if ([obj isKindOfClass:[NSDictionary class]]) {
+        NSDictionary *dict = (NSDictionary *)obj;
+
+        NSDictionary *continuationItem = dict[@"continuationItemRenderer"];
+        if ([continuationItem isKindOfClass:[NSDictionary class]]) {
+            NSDictionary *endpoint = continuationItem[@"continuationEndpoint"];
+            NSDictionary *command = endpoint[@"continuationCommand"];
+            NSString *token = command[@"token"];
+            if ([token isKindOfClass:[NSString class]] && token.length) return token;
+        }
+
+        NSDictionary *nextData = dict[@"nextContinuationData"];
+        NSString *legacyToken = nextData[@"continuation"];
+        if ([legacyToken isKindOfClass:[NSString class]] && legacyToken.length) return legacyToken;
+
+        // Some continuation payloads wrap the continuation command in an
+        // executor command. Search only the playlist shelf/page items passed
+        // to this function, never the unrelated recommendation carousels.
+        for (id value in dict.allValues) {
+            NSString *token = findPlaylistContinuationToken(value, depth + 1);
+            if (token.length) return token;
+        }
+    } else if ([obj isKindOfClass:[NSArray class]]) {
+        for (id item in (NSArray *)obj) {
+            NSString *token = findPlaylistContinuationToken(item, depth + 1);
+            if (token.length) return token;
+        }
+    }
+    return nil;
+}
+
+static void addPlaylistTrack(NSString *videoId, NSString *title, NSMutableArray<NSDictionary *> *tracks, NSMutableSet<NSString *> *seenVideoIDs) {
+    if (![videoId isKindOfClass:[NSString class]] || videoId.length == 0) return;
+    if ([seenVideoIDs containsObject:videoId]) return;
+    [seenVideoIDs addObject:videoId];
+    [tracks addObject:@{ @"videoId": videoId, @"title": (title.length ? title : @"Track") }];
+}
+
+static NSString *musicTextFromObject(id value) {
+    if (![value isKindOfClass:[NSDictionary class]]) return nil;
+    NSDictionary *dict = (NSDictionary *)value;
+    NSString *simpleText = dict[@"simpleText"];
+    if ([simpleText isKindOfClass:[NSString class]] && simpleText.length) return simpleText;
+    NSArray *runs = dict[@"runs"];
+    if (![runs isKindOfClass:[NSArray class]]) return nil;
+    NSMutableArray *parts = [NSMutableArray array];
+    for (NSDictionary *run in runs) {
+        NSString *part = [run isKindOfClass:[NSDictionary class]] ? run[@"text"] : nil;
+        if ([part isKindOfClass:[NSString class]]) [parts addObject:part];
+    }
+    NSString *joined = [parts componentsJoinedByString:@""];
+    return joined.length ? joined : nil;
+}
+
+static void extractPlaylistTracksFromItems(id obj, NSMutableArray<NSDictionary *> *tracks, NSMutableSet<NSString *> *seenVideoIDs, NSUInteger depth) {
+    if (!obj || depth > 28) return;
+
+    if ([obj isKindOfClass:[NSDictionary class]]) {
+        NSDictionary *dict = (NSDictionary *)obj;
+        NSDictionary *renderer = dict[@"musicResponsiveListItemRenderer"];
+        if ([renderer isKindOfClass:[NSDictionary class]]) {
+            NSString *videoId = nil;
+            NSDictionary *itemData = renderer[@"playlistItemData"];
+            if ([itemData isKindOfClass:[NSDictionary class]]) {
+                id candidate = itemData[@"videoId"];
+                if ([candidate isKindOfClass:[NSString class]]) videoId = candidate;
+            }
+            if (!videoId) {
+                NSDictionary *watch = renderer[@"navigationEndpoint"][@"watchEndpoint"];
+                id candidate = watch[@"videoId"];
+                if ([candidate isKindOfClass:[NSString class]]) videoId = candidate;
+            }
+            if (!videoId) {
+                NSDictionary *overlay = renderer[@"overlay"][@"musicItemThumbnailOverlayRenderer"];
+                NSDictionary *playButton = overlay[@"content"][@"musicPlayButtonRenderer"];
+                id candidate = playButton[@"playNavigationEndpoint"][@"watchEndpoint"][@"videoId"];
+                if ([candidate isKindOfClass:[NSString class]]) videoId = candidate;
+            }
+
+            NSString *title = nil;
+            NSArray *columns = renderer[@"flexColumns"];
+            if ([columns isKindOfClass:[NSArray class]] && columns.count) {
+                NSDictionary *columnRenderer = columns[0][@"musicResponsiveListItemFlexColumnRenderer"];
+                title = musicTextFromObject(columnRenderer[@"text"]);
+            }
+            addPlaylistTrack(videoId, title, tracks, seenVideoIDs);
+            return;
+        }
+
+        NSDictionary *panelRenderer = dict[@"playlistPanelVideoRenderer"];
+        if ([panelRenderer isKindOfClass:[NSDictionary class]]) {
+            NSString *videoId = panelRenderer[@"videoId"];
+            NSString *title = musicTextFromObject(panelRenderer[@"title"]);
+            addPlaylistTrack(videoId, title, tracks, seenVideoIDs);
+            return;
+        }
+
+        for (id value in dict.allValues)
+            extractPlaylistTracksFromItems(value, tracks, seenVideoIDs, depth + 1);
+    } else if ([obj isKindOfClass:[NSArray class]]) {
+        for (id item in (NSArray *)obj)
+            extractPlaylistTracksFromItems(item, tracks, seenVideoIDs, depth + 1);
+    }
+}
+
 static NSArray<NSDictionary *> *extractPlaylistTracks(NSString *playlistId) {
     NSMutableArray<NSDictionary *> *tracks = [NSMutableArray array];
+    NSMutableSet<NSString *> *seenVideoIDs = [NSMutableSet set];
+
     YTMUWritePlaylistDebugLog([NSString stringWithFormat:@"--- Playlist fetch %@ ---", [NSDate date]]);
     YTMUWritePlaylistDebugLog([NSString stringWithFormat:@"Resolved playlist ID: %@", playlistId ?: @"(nil)"]);
 
@@ -926,8 +913,11 @@ static NSArray<NSDictionary *> *extractPlaylistTracks(NSString *playlistId) {
         return tracks;
     }
 
+    // A normal public playlist uses VL + PL... as its InnerTube browseId.
+    // Do not prefix an ID that is already a browseId.
     NSString *browseId = playlistId;
-    if ([[browseId uppercaseString] hasPrefix:@"PL"]) browseId = [@"VL" stringByAppendingString:browseId];
+    if ([[browseId uppercaseString] hasPrefix:@"PL"])
+        browseId = [@"VL" stringByAppendingString:browseId];
 
     NSURL *url = [NSURL URLWithString:@"https://music.youtube.com/youtubei/v1/browse?prettyPrint=false"];
     NSURLSessionConfiguration *configuration = [NSURLSessionConfiguration ephemeralSessionConfiguration];
@@ -937,39 +927,37 @@ static NSArray<NSDictionary *> *extractPlaylistTracks(NSString *playlistId) {
 
     NSDictionary *context = @{@"client": @{
         @"clientName": @"WEB_REMIX",
-        @"clientVersion": @"1.20260327.10.00",
+        @"clientVersion": @"1.20260707.12.00",
         @"hl": @"en",
         @"gl": @"US"
     }};
 
-    // Reuse the app's existing YouTube Music cookies. No API key is added.
     NSArray<NSHTTPCookie *> *cookies = [[NSHTTPCookieStorage sharedHTTPCookieStorage] cookiesForURL:url];
     NSMutableArray<NSString *> *cookieParts = [NSMutableArray array];
     NSString *sapisid = nil;
     for (NSHTTPCookie *cookie in cookies) {
-        if (cookie.name.length > 0 && cookie.value.length > 0) {
+        if (cookie.name.length && cookie.value.length)
             [cookieParts addObject:[NSString stringWithFormat:@"%@=%@", cookie.name, cookie.value]];
-        }
         if (!sapisid && ([cookie.name isEqualToString:@"SAPISID"] ||
                          [cookie.name isEqualToString:@"__Secure-3PAPISID"] ||
-                         [cookie.name isEqualToString:@"__Secure-1PAPISID"])) {
+                         [cookie.name isEqualToString:@"__Secure-1PAPISID"]))
             sapisid = cookie.value;
-        }
     }
 
     NSString *origin = @"https://music.youtube.com";
     NSString *authHeader = generateSAPISIDHASH(sapisid, origin);
-    YTMUWritePlaylistDebugLog([NSString stringWithFormat:@"YouTube cookies available: %@; SAPISID auth available: %@",
-                              cookieParts.count ? @"yes" : @"no", authHeader.length ? @"yes" : @"no"]);
+    YTMUWritePlaylistDebugLog([NSString stringWithFormat:@"Cookies: %@; SAPISID auth: %@",
+                               cookieParts.count ? @"available" : @"unavailable",
+                               authHeader.length ? @"available" : @"unavailable"]);
 
     NSString *continuation = nil;
-    NSMutableSet *seenContinuations = [NSMutableSet set];
+    NSMutableSet<NSString *> *seenContinuations = [NSMutableSet set];
     NSUInteger page = 0;
 
     while (page < 100) {
-        NSMutableDictionary *bodyDict = [@{@"context": context} mutableCopy];
-        if (continuation.length > 0) bodyDict[@"continuation"] = continuation;
-        else bodyDict[@"browseId"] = browseId;
+        NSMutableDictionary *body = [@{@"context": context} mutableCopy];
+        if (continuation.length) body[@"continuation"] = continuation;
+        else body[@"browseId"] = browseId;
 
         NSMutableURLRequest *request = [NSMutableURLRequest requestWithURL:url];
         request.HTTPMethod = @"POST";
@@ -978,15 +966,17 @@ static NSArray<NSDictionary *> *extractPlaylistTracks(NSString *playlistId) {
         [request setValue:origin forHTTPHeaderField:@"Origin"];
         [request setValue:origin forHTTPHeaderField:@"X-Origin"];
         [request setValue:[origin stringByAppendingString:@"/"] forHTTPHeaderField:@"Referer"];
+        [request setValue:@"67" forHTTPHeaderField:@"X-YouTube-Client-Name"];
+        [request setValue:@"1.20260707.12.00" forHTTPHeaderField:@"X-YouTube-Client-Version"];
         [request setValue:@"Mozilla/5.0 (iPhone; CPU iPhone OS 16_5 like Mac OS X) AppleWebKit/605.1.15" forHTTPHeaderField:@"User-Agent"];
-        if (cookieParts.count > 0) [request setValue:[cookieParts componentsJoinedByString:@"; "] forHTTPHeaderField:@"Cookie"];
-        if (authHeader.length > 0) {
+        if (cookieParts.count) [request setValue:[cookieParts componentsJoinedByString:@"; "] forHTTPHeaderField:@"Cookie"];
+        if (authHeader.length) {
             [request setValue:authHeader forHTTPHeaderField:@"Authorization"];
             [request setValue:@"0" forHTTPHeaderField:@"X-Goog-AuthUser"];
         }
-        request.HTTPBody = [NSJSONSerialization dataWithJSONObject:bodyDict options:0 error:nil];
+        request.HTTPBody = [NSJSONSerialization dataWithJSONObject:body options:0 error:nil];
 
-        dispatch_semaphore_t sema = dispatch_semaphore_create(0);
+        dispatch_semaphore_t semaphore = dispatch_semaphore_create(0);
         __block NSData *responseData = nil;
         __block NSError *requestError = nil;
         __block NSHTTPURLResponse *httpResponse = nil;
@@ -994,48 +984,60 @@ static NSArray<NSDictionary *> *extractPlaylistTracks(NSString *playlistId) {
             responseData = data;
             requestError = error;
             if ([response isKindOfClass:[NSHTTPURLResponse class]]) httpResponse = (NSHTTPURLResponse *)response;
-            dispatch_semaphore_signal(sema);
+            dispatch_semaphore_signal(semaphore);
         }];
         [task resume];
 
-        if (dispatch_semaphore_wait(sema, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(25 * NSEC_PER_SEC))) != 0) {
+        if (dispatch_semaphore_wait(semaphore, dispatch_time(DISPATCH_TIME_NOW, (int64_t)(25 * NSEC_PER_SEC))) != 0) {
             [task cancel];
             YTMUWritePlaylistDebugLog([NSString stringWithFormat:@"Page %lu timed out", (unsigned long)(page + 1)]);
             break;
         }
 
-        NSInteger statusCode = httpResponse.statusCode;
-        if (requestError || responseData.length == 0 || (statusCode != 0 && (statusCode < 200 || statusCode >= 300))) {
+        NSInteger status = httpResponse.statusCode;
+        if (requestError || !responseData.length || (status && (status < 200 || status >= 300))) {
             YTMUWritePlaylistDebugLog([NSString stringWithFormat:@"Page %lu failed: HTTP %ld, error=%@",
-                                      (unsigned long)(page + 1), (long)statusCode,
-                                      requestError.localizedDescription ?: @"none"]);
+                                       (unsigned long)(page + 1), (long)status,
+                                       requestError.localizedDescription ?: @"none"]);
             break;
         }
 
         NSError *jsonError = nil;
-        id jsonObject = [NSJSONSerialization JSONObjectWithData:responseData options:NSJSONReadingMutableContainers error:&jsonError];
-        if (![jsonObject isKindOfClass:[NSDictionary class]]) {
+        id json = [NSJSONSerialization JSONObjectWithData:responseData options:NSJSONReadingMutableContainers error:&jsonError];
+        if (![json isKindOfClass:[NSDictionary class]]) {
             YTMUWritePlaylistDebugLog([NSString stringWithFormat:@"Page %lu invalid JSON: %@",
-                                      (unsigned long)(page + 1), jsonError.localizedDescription ?: @"unknown"]);
+                                       (unsigned long)(page + 1), jsonError.localizedDescription ?: @"unknown"]);
             break;
         }
 
-        NSDictionary *json = (NSDictionary *)jsonObject;
-        NSUInteger before = tracks.count;
-        extractTracksFromJSONObject(json, tracks);
-        page++;
-        YTMUWritePlaylistDebugLog([NSString stringWithFormat:@"Page %lu: HTTP %ld, added %lu, total %lu",
-                                  (unsigned long)page, (long)statusCode,
-                                  (unsigned long)(tracks.count - before), (unsigned long)tracks.count]);
+        NSMutableArray *pageItems = [NSMutableArray array];
+        if (page == 0) {
+            // Initial playlist page: only parse the actual playlist shelf.
+            NSMutableArray<NSArray *> *shelves = [NSMutableArray array];
+            collectPlaylistShelfContents(json, shelves, 0);
+            for (NSArray *shelf in shelves) [pageItems addObjectsFromArray:shelf];
+        } else {
+            // Newer InnerTube responses append playlist rows through
+            // onResponseReceivedActions/Endpoints rather than the old shelf path.
+            collectContinuationItems(json, pageItems, 0);
+        }
 
-        NSMutableSet *tokenVisited = [NSMutableSet set];
-        NSString *nextToken = findContinuationToken(json, tokenVisited, 0);
-        if (nextToken.length == 0) {
-            YTMUWritePlaylistDebugLog(@"Pagination finished: no continuation token.");
+        NSUInteger before = tracks.count;
+        extractPlaylistTracksFromItems(pageItems, tracks, seenVideoIDs, 0);
+        page++;
+        YTMUWritePlaylistDebugLog([NSString stringWithFormat:@"Page %lu: HTTP %ld, items %lu, added %lu, total %lu",
+                                   (unsigned long)page, (long)status,
+                                   (unsigned long)pageItems.count,
+                                   (unsigned long)(tracks.count - before),
+                                   (unsigned long)tracks.count]);
+
+        NSString *nextToken = findPlaylistContinuationToken(pageItems, 0);
+        if (!nextToken.length) {
+            YTMUWritePlaylistDebugLog(@"Pagination finished: no playlist continuation token.");
             break;
         }
         if ([seenContinuations containsObject:nextToken]) {
-            YTMUWritePlaylistDebugLog(@"Pagination stopped: repeated continuation token.");
+            YTMUWritePlaylistDebugLog(@"Pagination stopped: repeated playlist continuation token.");
             break;
         }
         [seenContinuations addObject:nextToken];
@@ -1046,6 +1048,7 @@ static NSArray<NSDictionary *> *extractPlaylistTracks(NSString *playlistId) {
     YTMUWritePlaylistDebugLog([NSString stringWithFormat:@"Playlist fetch completed: %lu tracks.", (unsigned long)tracks.count]);
     return tracks;
 }
+
 %hook ELMTouchCommandPropertiesHandler
 - (void)handleTap {
 
