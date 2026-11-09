@@ -25,6 +25,12 @@ on:
        type: boolean
        required: true
        default: false
+
+      enable_lastfm:
+       description: "Integrate Last.fm Scrobbler (MaxMusic)"
+       type: boolean
+       required: true
+       default: false
        
       ipa_url:
         description: "URL to the decrypted IPA file"
@@ -160,7 +166,7 @@ jobs:
 
       - name: Clone Return-YouTube-Music-Dislikes
         if: ${{ inputs.enable_rymd }}
-        run: git clone --quiet --depth=1 https://github.com/PoomSmart/Return-YouTube-Music-Dislikes.git
+        run: git clone --quiet --depth=1 https://github.com/Mark02-2012/RYMD-MaxMusic.git
 
       - name: Clone YTMABConfig
         if: ${{ inputs.enable_ytmabc }}
@@ -174,10 +180,14 @@ jobs:
         if: ${{ inputs.enable_volumeboostyt }}
         run: git clone --quiet --depth=1 https://github.com/VasirakCalgux/VolumeBoostYT.git
 
+      - name: Clone Last.fm Scrobbler
+        if: ${{ inputs.enable_lastfm }}
+        run: git clone --quiet --depth=1 https://github.com/ImMALWARE/ios-yt-music-last.fm.git
+
       - name: Build Return-YouTube-Music-Dislikes
         if: ${{ inputs.enable_rymd }}
         run: |
-          cd Return-YouTube-Music-Dislikes && make package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootless
+          cd RYMD-MaxMusic && make package FINALPACKAGE=1 THEOS_PACKAGE_SCHEME=rootless
           mv packages/*.deb ../rymd.deb
 
       - name: Build YTMABConfig
@@ -197,6 +207,12 @@ jobs:
         run: |
           cd VolumeBoostYT && make clean package DEBUG=0 FINALPACKAGE=1
           mv packages/*.deb ../volumeboostyt.deb
+
+      - name: Build Last.fm Scrobbler
+        if: ${{ inputs.enable_lastfm }}
+        run: |
+          cd ios-yt-music-last.fm && make clean package DEBUG=0 FINALPACKAGE=1
+          mv packages/*.deb ../lastfm.deb
 
       - name: Build Modified YTMusicUltimate Tweak
         run: |
@@ -224,7 +240,8 @@ jobs:
           if [ "${{ inputs.enable_rymd }}" = "false" ] && \
              [ "${{ inputs.enable_volumeboostyt }}" = "false" ] && \
              [ "${{ inputs.enable_youmusicpip }}" = "false" ] && \
-             [ "${{ inputs.enable_ytmabc }}" = "false" ]; then
+             [ "${{ inputs.enable_ytmabc }}" = "false" ] && \
+             [ "${{ inputs.enable_lastfm }}" = "false" ]; then
             
             echo "TAG_PREFIX=YTMU" >> $GITHUB_ENV
           else
