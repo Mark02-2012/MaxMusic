@@ -31,15 +31,6 @@ The best fork of <a href="https://github.com/dayanch96/YTMusicUltimate">YTMusicU
 ## Bug reporting
 **In the repo may be some issues, so please report any issue in the [Issues](https://github.com/Mark02-2012/MaxMusic/issues) section.**
 
-## Download table
-FROM 1.2 I'LL NOT UPDATE IT ANYMORE (will remove the files from github soon), JOIN MY TELEGRAM CHANNEL 👉<a href="https://t.me/Mark02workshop_official">HERE</a>👈
-Implemented new fixed deb for working downloads from release 9.23.4 and 2.4.1! (Also in Actions)
-| Release | YTM version | YTMUltimate version | MaxMusic version |
-| :--- | :---: | :---: | :---: |
-| [MaxMusic Latest][YTMU+Latest] | 9.37.2 | 2.4.1 fix | 1.1 |
-| [MaxMusic without YouMusicPiP][YTMU+no-YMP] | 9.37.2 | 2.4.1 fix | 1.1 no YouMusicPiP |
-| [YTMusicUltimate Latest][YTMULatest] | 9.37.2 | 2.4.1 fix | / |
-
 
 ## Download Links
 
@@ -49,7 +40,7 @@ Add __[https://ginsu.dev/repo](https://ginsu.dev/repo)__ to your favorite instal
 (arm.deb version for Rootful and arm64.deb version for Rootless devices)
 
 * **Sideloading:**
-You can find pre-built IPAs in the [Download table](#download-table) and the [releases tab](https://github.com/Mark02-2012/YTMusicUltimate/releases), but can also build one yourself, keep reading:
+You can find pre-built IPAs in my [Telegram channel](https://t.me/Mark02workshop_official), but can also build one yourself, keep reading:
 
 ## How to build a YTMusicUltimate and MaxMusic IPA by yourself using Github actions
 
@@ -103,11 +94,18 @@ MaxMusic is simply a fork of the original [YTMusicUltimate](https://github.com/D
        - Added new custom download tab design, offline playlists and custom offline player for downloaded songs (all with Liquid Glass; credits to @Ilhamaji)
        - New trash bin button to delete songs in download tab
        - Working downloads in newer versions of YT Music
-       - New feature "Download All Playlist Tracks" but still not working, will fix in 1.3</p>
+       - New feature "Download All Playlist Tracks" but still not working, will fix in 1.3 (still not fixed in 1.3 :( )</p>
+       
+  * **1.3 (November 9 2026)**:
+  <p>• Created by myself and added a new fork of Return-YouTube-Music-Dislikes, named Return YTMusic Dislikes MaxMusic, that offers a new feature "Auto Skip Disliked Songs". You can find its settings in YouTube Music > Account
+
+• Added a new tweak for the Last.fm Scrubbler feature, link here (REQUIRES LOGGING IN/CREATING A PERSONAL ACCOUNT TO USE THE APP)
+
+• Removed YouMusicPiP from my pre-compiled IPAs, but you can still integrate it by yourself with GitHub Actions</p>
 
 ## Added tweaks
 >[!NOTE]
->All added tweaks preferences can be found in YTMusic > Account > Settings, except for VolumeBoostYT and YouMusicPiP (Because them don't have a preferences section in settings).
+>All added tweaks preferences can be found in YTMusic > Account, except for VolumeBoostYT, YouMusicPiP and YTMABConfig (Because them don't have a preferences section in settings or have it in YTMusic > Account > Settings).
 >
 >YTMusicUltimate preferences can be
 found in YTMusic > Account.
@@ -116,6 +114,7 @@ found in YTMusic > Account.
   <summary>Return-YouTube-Music-Dislikes</summary>
    <p>Return-YouTube-Music-Dislikes is a tweak based on Return-YouTube-Dislikes that permit to view dislikes in YouTube Music app</p>
      <p><a href="https://github.com/PoomSmart/Return-YouTube-Music-Dislikes">Official repository</a> by <a href="https://github.com/PoomSmart">PoomSmart</a></p>
+     <p><a href="https://github.com/Mark02-2012/RYMD-MaxMusic">My fork of it</a> (the one I'm using in MaxMusic)</p>
    </details>
 
   <details>
@@ -134,4 +133,10 @@ found in YTMusic > Account.
      <summary>VolumeBoostYT</summary>
      <p>VolumeBoostYT is a tweak that was created for YouTube, but it's also compatible with YouTube Music, that permit to adjust and boost your volume from 0 to 2000% with gestures</p>
      <p><a href="https://github.com/VasirakCalgux/VolumeBoostYT">Official repository</a> by <a href="https://github.com/VasirakCalgux">VasirakCalgux</a></p>
+   </details>
+
+   <details>
+     <summary>Last.fm Scrubbler</summary>
+     <p>Last.fm Scrubbler for YouTube Music</a> is a tweak to port the <a href="last.fm">Last.fm</a> scrubbler feature on YouTube Music</p>
+     <p><a href="https://github.com/ImMALWARE/ios-yt-music-last.fm">Official repository</a> by <a href="https://github.com/ImMALWARE">ImMALWARE</a></p>
    </details>
