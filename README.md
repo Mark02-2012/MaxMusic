@@ -136,7 +136,7 @@ found in YTMusic > Account.
    </details>
 
    <details>
-     <summary>Last.fm Scrubbler</summary>
-     <p>Last.fm Scrubbler for YouTube Music</a> is a tweak to port the <a href="last.fm">Last.fm</a> scrubbler feature on YouTube Music</p>
+     <summary>Last.fm Scrobbler</summary>
+     <p>Last.fm Scrobbler for YouTube Music</a> is a tweak to port the <a href="last.fm">Last.fm</a> scrubbler feature on YouTube Music</p>
      <p><a href="https://github.com/ImMALWARE/ios-yt-music-last.fm">Official repository</a> by <a href="https://github.com/ImMALWARE">ImMALWARE</a></p>
    </details>
