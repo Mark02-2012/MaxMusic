@@ -57,7 +57,7 @@ concurrency:
 jobs:
   build:
     name: Build app
-    runs-on: ubuntu-latest
+    runs-on: macos-latest
     permissions:
       contents: write
 
